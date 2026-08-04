@@ -1,15 +1,12 @@
 [project]
-name = "garmin-workouts"
-version = "0.2.0"
-description = "Create, schedule, and manage running and cycling workouts in Garmin Connect"
+name = "garmin-running-workouts-import"
+version = "0.3.0"
+description = "Create, schedule, and manage running workouts in Garmin Connect"
 readme = "README.md"
 requires-python = ">=3.10,<3.15"
 dependencies = [
     "requests==2.33.1",
     "pyyaml==6.0.3",
-    "numpy==2.2.6",
-    "xlrd==2.0.2",
-    "pandas==2.3.3",
     "cloudscraper==1.2.71",
     "python-dotenv==1.2.1",
 ]

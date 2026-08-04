@@ -33,3 +33,10 @@ def test_plan_rejects_same_name_with_different_definition():
     plan = TrainingPlan({"workouts": [first, second]})
     with pytest.raises(ValueError, match="reused"):
         plan.unique_workouts()
+
+
+def test_plan_rejects_non_running_sport():
+    workout = _workout("2026-08-11")
+    workout["sport"] = "other"
+    with pytest.raises(ValueError, match="running workouts only"):
+        TrainingPlan({"workouts": [workout]})

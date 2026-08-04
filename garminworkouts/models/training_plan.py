@@ -2,14 +2,11 @@ from copy import deepcopy
 from datetime import date
 
 from garminworkouts.models.running_workout import RunningWorkout
-from garminworkouts.models.workout import Workout
 
 
 class TrainingPlan:
-    def __init__(self, config, ftp=None, power_target_diff=0.05):
+    def __init__(self, config):
         self.config = config
-        self.ftp = ftp
-        self.power_target_diff = power_target_diff
         self._entries = self._validate_and_build_entries()
 
     @property
@@ -52,14 +49,9 @@ class TrainingPlan:
             workout_config = deepcopy(item)
             workout_config.pop("date")
             sport = workout_config.get("sport", "running")
-            if sport == "running":
-                workout = RunningWorkout(workout_config)
-            elif sport == "cycling":
-                if self.ftp is None:
-                    raise ValueError("Cycling workouts require --ftp")
-                workout = Workout(workout_config, self.ftp, self.power_target_diff)
-            else:
-                raise ValueError(f"Unsupported sport '{sport}', expected running or cycling")
+            if sport != "running":
+                raise ValueError(f"Unsupported sport '{sport}'; this tool supports running workouts only")
+            workout = RunningWorkout(workout_config)
 
             calendar_key = (workout_date.isoformat(), workout.get_workout_name())
             if calendar_key in calendar_keys:

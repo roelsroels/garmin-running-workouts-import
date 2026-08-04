@@ -1,10 +1,10 @@
 # Garmin Running Workouts Import
 
-Create structured running workouts from readable YAML, upload them to Garmin Connect, and place them on the Garmin calendar so they sync to a compatible watch. Cycling/FTP workouts from the upstream project remain supported.
+Create structured running workouts from readable YAML, upload them to Garmin Connect, and place them on the Garmin calendar so they sync to a compatible watch. This fork is intentionally running-only; use the upstream project for other sports.
 
 > Garmin does not publish the web endpoints used by this tool. Garmin may change them without notice, and authentication can occasionally require maintenance.
 
-## What this fork adds
+## Features
 
 - Running workouts with warm-up, interval, recovery, rest, cooldown, and other step types.
 - Time, distance, or lap-button step endings.
@@ -135,12 +135,6 @@ Putting `YYMMDD` at the beginning of each name makes a workout easy to identify 
 uv run garmin-workouts import sample_workouts/running-6x2.yaml
 ```
 
-The original cycling format remains available and still requires FTP:
-
-```shell
-uv run garmin-workouts import --ftp 250 'sample_workouts/*.yaml'
-```
-
 Other upstream commands remain available:
 
 ```shell
@@ -177,4 +171,4 @@ uv sync --dev
 mise run check
 ```
 
-This fork is based on [mkuthan/garmin-workouts](https://github.com/mkuthan/garmin-workouts) and remains available under the Apache-2.0 license.
+This running-only fork is based on [mkuthan/garmin-workouts](https://github.com/mkuthan/garmin-workouts). This project remains available under the Apache-2.0 license.

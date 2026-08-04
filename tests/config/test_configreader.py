@@ -11,11 +11,18 @@ class MyTestCase(unittest.TestCase):
 
         expected_config = {
             "name": "Test",
+            "sport": "running",
             "steps": [
-                [{"power": 50, "duration": "2:00"}],
-                [{"power": 90, "duration": "12:00"}, {"power": 60, "duration": "4:00"}],
-                [{"power": 90, "duration": "12:00"}, {"power": 60, "duration": "4:00"}],
-                [{"power": 50, "duration": "2:00"}],
+                [{"type": "warmup", "duration": "5:00", "heart_rate_max": 120}],
+                [
+                    {"type": "interval", "duration": "3:00", "pace": "5:25-5:30"},
+                    {"type": "recovery", "duration": "1:30"},
+                ],
+                [
+                    {"type": "interval", "duration": "3:00", "pace": "5:25-5:30"},
+                    {"type": "recovery", "duration": "1:30"},
+                ],
+                [{"type": "warmup", "duration": "5:00", "heart_rate_max": 120}],
             ],
         }
 

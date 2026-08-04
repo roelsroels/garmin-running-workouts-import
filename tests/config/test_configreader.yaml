@@ -1,9 +1,10 @@
 name: "Test"
+sport: running
 
 steps:
   - !include test_configreader_inc.yaml
   - &INTERVAL
-    - { power: 90, duration: "12:00" }
-    - { power: 60, duration: "4:00" }
+    - { type: interval, duration: "3:00", pace: "5:25-5:30" }
+    - { type: recovery, duration: "1:30" }
   - *INTERVAL
   - !include test_configreader_inc.yaml
