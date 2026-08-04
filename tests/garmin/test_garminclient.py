@@ -1,197 +1,69 @@
-import unittest
-from unittest.mock import mock_open, patch
+from unittest.mock import MagicMock, mock_open, patch
 
-import requests
-from pytest_httpserver import HTTPServer
+import pytest
 
 from garminworkouts.garmin.garminclient import GarminClient
 
 
-class GarminClientTestCase(unittest.TestCase):
-    _ANY_WORKOUT = [{"foo1": "bar1"}]
-
-    def setUp(self):
-        self.httpserver = HTTPServer()
-        self.httpserver.start()
-        self.addCleanup(self.httpserver.stop)
-
-        # simulate authenticated user
-        self.httpserver.expect_request("/modern/settings").respond_with_data()
-
-        url = f"http://{self.httpserver.host}:{self.httpserver.port}"
-        self.client = GarminClient(
-            connect_url=url,
-            sso_url=url,
-            username="any username",
-            password="any password",
-            cookie_jar=None,  # don't store session cookies in a jar
-        )
-
-    def test_list_workouts(self):
-        batch_size = 10
-        any_workouts = [{"foo1": "bar1"}, {"foo2": "bar2"}]
-        empty_response = []
-
-        url = f"{GarminClient._WORKOUT_SERVICE_ENDPOINT}/workouts"
-        params1 = {"start": str(0), "limit": str(batch_size)}
-        params2 = {"start": str(batch_size), "limit": str(batch_size)}
-
-        self.httpserver.expect_request(url, query_string=params1).respond_with_json(any_workouts)
-        self.httpserver.expect_request(url, query_string=params2).respond_with_json(empty_response)
-
-        with self.client as connection:
-            workouts = connection.list_workouts(batch_size)
-            self.assertEqual(list(workouts), any_workouts)
-
-    def test_list_workouts_error_handling(self):
-        batch_size = 10
-
-        url = f"{GarminClient._WORKOUT_SERVICE_ENDPOINT}/workouts"
-        params = {"start": str(0), "limit": str(batch_size)}
-
-        self.httpserver.expect_request(url, query_string=params).respond_with_data(status=500)
-
-        with self.client as connection:
-            with self.assertRaises(requests.exceptions.HTTPError):
-                # list_workouts returns generator, evaluate it using next()
-                next(connection.list_workouts(batch_size))
-
-    def test_get_workout(self):
-        workout_id = 1
-
-        url = f"{GarminClient._WORKOUT_SERVICE_ENDPOINT}/workout/{workout_id}"
-        self.httpserver.expect_request(url).respond_with_json(GarminClientTestCase._ANY_WORKOUT)
-
-        with self.client as connection:
-            workout = connection.get_workout(workout_id)
-            self.assertEqual(workout, GarminClientTestCase._ANY_WORKOUT)
-
-    def test_get_workout_error_handling(self):
-        workout_id = 1
-
-        url = f"{GarminClient._WORKOUT_SERVICE_ENDPOINT}/workout/{workout_id}"
-        self.httpserver.expect_request(url).respond_with_data(status=500)
-
-        with self.client as connection:
-            self.assertRaises(requests.exceptions.HTTPError, connection.get_workout, workout_id)
-
-    def test_download_workout(self):
-        workout_id = 1
-        file = "workout.fit"
-        content = "any content"
-
-        url = f"{GarminClient._WORKOUT_SERVICE_ENDPOINT}/workout/FIT/{workout_id}"
-        self.httpserver.expect_request(url).respond_with_data(content)
-
-        with self.client as connection:
-            with patch("builtins.open", mock_open()) as mocked_file:
-                connection.download_workout(workout_id, file)
-
-                mocked_file.assert_called_once_with(file, "wb")
-                mocked_file().write.assert_called_once_with(content.encode())
-
-    def test_download_workout_error_handling(self):
-        workout_id = 1
-        file = "workout.fit"
-
-        url = f"{GarminClient._WORKOUT_SERVICE_ENDPOINT}/workout/FIT/{workout_id}"
-        self.httpserver.expect_request(url).respond_with_data(status=500)
-
-        with self.client as connection:
-            self.assertRaises(requests.exceptions.HTTPError, connection.download_workout, workout_id, file)
-
-    def test_save_workout(self):
-        url = f"{GarminClient._WORKOUT_SERVICE_ENDPOINT}/workout"
-        self.httpserver.expect_request(url, method="POST", json=GarminClientTestCase._ANY_WORKOUT).respond_with_data()
-
-        with self.client as connection:
-            connection.save_workout(GarminClientTestCase._ANY_WORKOUT)
-
-    def test_save_workout_error_handling(self):
-        url = f"{GarminClient._WORKOUT_SERVICE_ENDPOINT}/workout"
-        self.httpserver.expect_request(url, method="POST", json=GarminClientTestCase._ANY_WORKOUT).respond_with_data(
-            status=500
-        )
-
-        with self.client as connection:
-            self.assertRaises(requests.exceptions.HTTPError, connection.save_workout, GarminClientTestCase._ANY_WORKOUT)
-
-    def test_update_workout(self):
-        workout_id = 1
-
-        url = f"{GarminClient._WORKOUT_SERVICE_ENDPOINT}/workout/{workout_id}"
-        self.httpserver.expect_request(url, method="PUT", json=GarminClientTestCase._ANY_WORKOUT).respond_with_data()
-
-        with self.client as connection:
-            connection.update_workout(workout_id, GarminClientTestCase._ANY_WORKOUT)
-
-    def test_update_workout_error_handling(self):
-        workout_id = 1
-
-        url = f"{GarminClient._WORKOUT_SERVICE_ENDPOINT}/workout/{workout_id}"
-        self.httpserver.expect_request(url, method="PUT", json=GarminClientTestCase._ANY_WORKOUT).respond_with_data(
-            status=500
-        )
-
-        with self.client as connection:
-            self.assertRaises(
-                requests.exceptions.HTTPError, connection.update_workout, workout_id, GarminClientTestCase._ANY_WORKOUT
-            )
-
-    def test_delete_workout(self):
-        workout_id = 1
-
-        url = f"{GarminClient._WORKOUT_SERVICE_ENDPOINT}/workout/{workout_id}"
-        self.httpserver.expect_request(url, method="DELETE").respond_with_data()
-
-        with self.client as connection:
-            connection.delete_workout(workout_id)
-
-    def test_delete_workout_error_handling(self):
-        workout_id = 1
-
-        url = f"{GarminClient._WORKOUT_SERVICE_ENDPOINT}/workout/{workout_id}"
-        self.httpserver.expect_request(url, method="DELETE").respond_with_data(status=500)
-
-        with self.client as connection:
-            self.assertRaises(requests.exceptions.HTTPError, connection.delete_workout, workout_id)
-
-    def test_schedule_workout(self):
-        workout_id = 1
-        date = "any date"
-
-        url = f"{GarminClient._WORKOUT_SERVICE_ENDPOINT}/schedule/{workout_id}"
-        self.httpserver.expect_request(url, method="POST", json={"date": date}).respond_with_data()
-
-        with self.client as connection:
-            connection.schedule_workout(workout_id, date)
-
-    def test_schedule_workout_error_handling(self):
-        workout_id = 1
-        date = "any date"
-
-        url = f"{GarminClient._WORKOUT_SERVICE_ENDPOINT}/schedule/{workout_id}"
-        self.httpserver.expect_request(url, method="POST", json={"date": date}).respond_with_data(status=500)
-
-        with self.client as connection:
-            self.assertRaises(requests.exceptions.HTTPError, connection.schedule_workout, workout_id, date)
-
-    def test_list_scheduled_workouts(self):
-        year = 2026
-        month = 8
-        scheduled = [{"workoutId": 1, "date": "2026-08-11"}]
-
-        url = f"{GarminClient._WORKOUT_SERVICE_ENDPOINT}/schedule/year/{year}/month/{month - 1}"
-        self.httpserver.expect_request(url).respond_with_json(scheduled)
-
-        with self.client as connection:
-            self.assertEqual(connection.list_scheduled_workouts(year, month), scheduled)
-
-    def test_list_scheduled_workouts_rejects_invalid_month(self):
-        with self.client as connection:
-            with self.assertRaises(ValueError):
-                connection.list_scheduled_workouts(2026, 13)
+def _client_with_session():
+    client = GarminClient("user", "password", ".tokens")
+    client.session = MagicMock()
+    return client
 
 
-if __name__ == "__main__":
-    unittest.main()
+@patch("garminconnect.Garmin")
+def test_context_logs_in_with_token_store(garmin):
+    session = garmin.return_value
+    with GarminClient("user", "password", ".tokens") as connection:
+        assert connection.session is session
+    garmin.assert_called_once_with("user", "password")
+    session.login.assert_called_once_with(tokenstore=".tokens")
+
+
+def test_list_workouts_paginates():
+    client = _client_with_session()
+    first = [{"workoutId": 1}, {"workoutId": 2}]
+    client.session.get_workouts.side_effect = [first, []]
+    assert list(client.list_workouts(batch_size=2)) == first
+    assert client.session.get_workouts.call_count == 2
+
+
+def test_list_workouts_stops_after_short_page():
+    client = _client_with_session()
+    client.session.get_workouts.return_value = [{"workoutId": 1}]
+    assert list(client.list_workouts(batch_size=2)) == [{"workoutId": 1}]
+    client.session.get_workouts.assert_called_once_with(start=0, limit=2)
+
+
+def test_workout_operations_delegate_to_current_api():
+    client = _client_with_session()
+    payload = {"workoutName": "Run"}
+
+    client.get_workout(7)
+    client.save_workout(payload)
+    client.update_workout(7, payload)
+    client.delete_workout(7)
+    client.schedule_workout(7, "2026-08-11")
+    client.list_scheduled_workouts(2026, 8)
+
+    client.session.get_workout_by_id.assert_called_once_with(7)
+    client.session.upload_workout.assert_called_once_with(payload)
+    client.session.update_workout.assert_called_once_with(7, payload)
+    client.session.delete_workout.assert_called_once_with(7)
+    client.session.schedule_workout.assert_called_once_with(7, "2026-08-11")
+    client.session.get_scheduled_workouts.assert_called_once_with(2026, 8)
+
+
+def test_download_workout_writes_bytes():
+    client = _client_with_session()
+    client.session.download_workout.return_value = b"fit"
+    with patch("builtins.open", mock_open()) as output:
+        client.download_workout(7, "run.fit")
+    output.assert_called_once_with("run.fit", "wb")
+    output().write.assert_called_once_with(b"fit")
+
+
+def test_list_scheduled_workouts_rejects_invalid_month():
+    client = _client_with_session()
+    with pytest.raises(ValueError, match="Month must be between"):
+        client.list_scheduled_workouts(2026, 13)

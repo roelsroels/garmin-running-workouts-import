@@ -2,7 +2,7 @@
 
 Create structured running workouts from readable YAML, upload them to Garmin Connect, and place them on the Garmin calendar so they sync to a compatible watch. This fork is intentionally running-only; use the upstream project for other sports.
 
-> Garmin does not publish the web endpoints used by this tool. Garmin may change them without notice, and authentication can occasionally require maintenance.
+> Garmin does not publish the web endpoints used by this tool. Garmin may change them without notice, and authentication can occasionally require maintenance. This fork uses the actively maintained `garminconnect` client for the current authenticated API.
 
 ## Features
 
@@ -18,7 +18,7 @@ Create structured running workouts from readable YAML, upload them to Garmin Con
 
 ## Installation
 
-Python 3.10-3.14 and [uv](https://docs.astral.sh/uv/) are required.
+Python 3.12-3.14 and [uv](https://docs.astral.sh/uv/) are required.
 
 ```shell
 git clone https://github.com/OWNER/garmin-running-workouts-import.git
@@ -176,7 +176,7 @@ The example plan demonstrates this workflow, but it is not medical clearance. Th
 
 ## Security and limitations
 
-- `.env`, `.venv`, and Garmin cookie jars are ignored by Git.
+- `.env`, `.venv`, and the Garmin token store are ignored by Git.
 - Use a unique Garmin password and protect `.env` with local file permissions.
 - Do not run an unattended cloud job containing Garmin credentials.
 - Garmin's private endpoints, MFA, CAPTCHA, or SSO changes can break authentication.

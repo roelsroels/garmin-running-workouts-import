@@ -3,12 +3,11 @@ name = "garmin-running-workouts-import"
 version = "0.3.0"
 description = "Create, schedule, and manage running workouts in Garmin Connect"
 readme = "README.md"
-requires-python = ">=3.10,<3.15"
+requires-python = ">=3.12,<3.15"
 dependencies = [
-    "requests==2.33.1",
     "pyyaml==6.0.3",
-    "cloudscraper==1.2.71",
     "python-dotenv==1.2.1",
+    "garminconnect==0.3.8",
 ]
 
 [project.scripts]
@@ -30,7 +29,6 @@ package = false
 dev = [
     "pytest",
     "pytest-cov",
-    "pytest-httpserver==1.1.5",
     "ruff",
 ]
 

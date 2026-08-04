@@ -8,7 +8,7 @@ __pycache__/
 .ruff_cache/
 
 # Coverage
-.coverage
+.coverage*
 
 # Environments
 .env
@@ -21,6 +21,7 @@ venv/
 # Garmin authentication sessions
 .garmin-cookies.txt
 *.garmin-cookies.txt
+.garmin-tokens/
 
 # Personalized dated plans stay local
 personal_plans/
