@@ -21,6 +21,11 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 include = ["garminworkouts*"]
 
+[tool.uv]
+# The repository launcher loads the source tree directly. Avoid editable .pth
+# loaders, which can be disabled by hardened macOS development environments.
+package = false
+
 [dependency-groups]
 dev = [
     "pytest",

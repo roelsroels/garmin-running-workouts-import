@@ -26,13 +26,11 @@ cd garmin-running-workouts-import
 uv sync --dev
 ```
 
-If macOS reports `ModuleNotFoundError: No module named 'garminworkouts'`, the
-existing `.venv` was created with an incompatible Python runtime. Rebuild only
-the disposable environment with Homebrew Python, then retry:
+Use the repository launcher for every command. It runs the source directly and
+does not depend on Python editable-install loaders:
 
 ```shell
-uv venv --clear --python /opt/homebrew/bin/python3
-uv sync --dev
+./garmin-workouts --help
 ```
 
 ## Preview a four-week plan
@@ -40,7 +38,7 @@ uv sync --dev
 Previewing is offline and does not require Garmin credentials:
 
 ```shell
-uv run garmin-workouts plan sample_plans/running-4-week-example.yaml
+./garmin-workouts plan sample_plans/running-4-week-example.yaml
 ```
 
 The command prints the exact Garmin payloads and makes no remote changes.
@@ -52,8 +50,8 @@ instructions, and training details are not published with the repository. Create
 place a plan there, then use the same preview-first workflow:
 
 ```shell
-uv run garmin-workouts plan personal_plans/my-four-week-plan.yaml
-uv run garmin-workouts plan personal_plans/my-four-week-plan.yaml --apply
+./garmin-workouts plan personal_plans/my-four-week-plan.yaml
+./garmin-workouts plan personal_plans/my-four-week-plan.yaml --apply
 ```
 
 ## Apply and schedule a plan
@@ -68,7 +66,7 @@ chmod 600 .env
 Fill in `GARMIN_USERNAME` and `GARMIN_PASSWORD` in `.env`, then run. The CLI loads this local file automatically:
 
 ```shell
-uv run garmin-workouts plan sample_plans/running-4-week-example.yaml --apply
+./garmin-workouts plan sample_plans/running-4-week-example.yaml --apply
 ```
 
 Applying a plan:
@@ -152,16 +150,16 @@ Putting `YYMMDD` at the beginning of each name makes a workout easy to identify 
 ## Import a single workout
 
 ```shell
-uv run garmin-workouts import sample_workouts/running-6x2.yaml
+./garmin-workouts import sample_workouts/running-6x2.yaml
 ```
 
 Other upstream commands remain available:
 
 ```shell
-uv run garmin-workouts list
-uv run garmin-workouts get --id WORKOUT_ID
-uv run garmin-workouts schedule --date 2026-08-11 --workout_id WORKOUT_ID
-uv run garmin-workouts export ./exported-workouts
+./garmin-workouts list
+./garmin-workouts get --id WORKOUT_ID
+./garmin-workouts schedule --date 2026-08-11 --workout_id WORKOUT_ID
+./garmin-workouts export ./exported-workouts
 ```
 
 ## Four-week FIT-driven workflow
