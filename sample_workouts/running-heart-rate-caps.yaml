@@ -1,0 +1,8 @@
+sport: running
+name: "HR cap progression"
+description: "Progressive aerobic run using upper heart-rate caps"
+
+steps:
+  - { type: warmup, duration: "10:00", heart_rate_max: 120 }
+  - { type: interval, duration: "15:00", heart_rate_max: 140 }
+  - { type: cooldown, duration: "10:00", heart_rate_max: 120 }
