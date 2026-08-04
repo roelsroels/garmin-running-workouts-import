@@ -12,11 +12,13 @@ class PlanApplier:
         self.connection = connection
 
     def apply(self, schedule=True):
-        existing_by_name = self._existing_workouts_by_name()
+        planned_workouts = self.plan.unique_workouts()
+        planned_names = {workout.get_workout_name() for workout in planned_workouts}
+        existing_by_name = self._existing_workouts_by_name(planned_names)
         workout_ids = {}
         actions = []
 
-        for workout in self.plan.unique_workouts():
+        for workout in planned_workouts:
             name = workout.get_workout_name()
             existing = existing_by_name.get(name)
             if existing:
@@ -53,12 +55,14 @@ class PlanApplier:
 
         return actions
 
-    def _existing_workouts_by_name(self):
+    def _existing_workouts_by_name(self, planned_names):
         workouts = defaultdict(list)
         for workout in self.connection.list_workouts():
             if not RunningWorkout.is_running(workout):
                 continue
-            workouts[RunningWorkout.extract_workout_name(workout)].append(workout)
+            name = RunningWorkout.extract_workout_name(workout)
+            if name in planned_names:
+                workouts[name].append(workout)
         duplicates = [name for name, items in workouts.items() if len(items) > 1]
         if duplicates:
             raise ValueError(f"Garmin Connect contains duplicate workout names: {', '.join(sorted(duplicates))}")

@@ -1,6 +1,8 @@
 import json
 from unittest.mock import patch
 
+import pytest
+
 from garminworkouts.models.training_plan import TrainingPlan
 from garminworkouts.plan import PlanApplier, preview_plan
 
@@ -92,6 +94,32 @@ def test_apply_ignores_existing_non_running_workout_with_same_name():
     assert len(connection.saved) == 1
     assert not connection.updated
     assert actions[0]["action"] == "created"
+
+
+def test_apply_ignores_duplicate_workout_names_outside_plan():
+    unrelated = {
+        "workoutName": "Benchmark Run",
+        "sportType": {"sportTypeId": 1, "sportTypeKey": "running"},
+    }
+    existing = [dict(unrelated, workoutId=7), dict(unrelated, workoutId=8)]
+    connection = FakeConnection(existing)
+
+    actions = PlanApplier(_plan(), connection).apply(schedule=False)
+
+    assert len(connection.saved) == 1
+    assert actions[0]["action"] == "created"
+
+
+def test_apply_rejects_duplicate_workout_name_used_by_plan():
+    planned = {
+        "workoutName": "W1Q 6x2 525",
+        "sportType": {"sportTypeId": 1, "sportTypeKey": "running"},
+    }
+    existing = [dict(planned, workoutId=7), dict(planned, workoutId=8)]
+    connection = FakeConnection(existing)
+
+    with pytest.raises(ValueError, match="W1Q 6x2 525"):
+        PlanApplier(_plan(), connection).apply(schedule=False)
 
 
 def test_workout_id_is_extracted_from_nested_upload_response():
