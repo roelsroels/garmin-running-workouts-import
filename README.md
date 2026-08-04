@@ -26,6 +26,15 @@ cd garmin-running-workouts-import
 uv sync --dev
 ```
 
+If macOS reports `ModuleNotFoundError: No module named 'garminworkouts'`, the
+existing `.venv` was created with an incompatible Python runtime. Rebuild only
+the disposable environment with Homebrew Python, then retry:
+
+```shell
+uv venv --clear --python /opt/homebrew/bin/python3
+uv sync --dev
+```
+
 ## Preview a four-week plan
 
 Previewing is offline and does not require Garmin credentials:
