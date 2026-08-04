@@ -9,6 +9,7 @@ Create structured running workouts from readable YAML, upload them to Garmin Con
 - Running workouts with warm-up, interval, recovery, rest, cooldown, and other step types.
 - Time, distance, or lap-button step endings.
 - Pace ranges written naturally as `5:25-5:30` or `["5:25", "5:30"]` per kilometre.
+- Heart-rate caps, custom BPM ranges, and Garmin heart-rate zones.
 - Explicit repeat groups.
 - Dated multi-week plans in one YAML file.
 - Preview-first operation: no Garmin login or changes until `--apply` is supplied.
@@ -86,9 +87,27 @@ Supported running fields:
 | `distance` | `400`, `"400m"`, `"10.3km"` | End after distance |
 | `lap_button` | `true` | End when the lap button is pressed |
 | `pace` | `"5:25-5:30"` | Pace alert range in min/km |
+| `heart_rate_max` | `120` | Practical upper cap, represented as Garmin's `35-120 bpm` target range |
+| `heart_rate` | `[110, 130]` | Custom lower/upper BPM target range |
+| `heart_rate_zone` | `2` | Garmin running heart-rate zone 1-5 |
 | `description` | free text | Optional step instruction |
 
-Use only one ending condition per step. Omitting all three ending fields means lap-button press. Pace targets are converted to Garmin's metres-per-second bounds with the faster limit first.
+Use only one ending condition and one intensity target per step. Omitting all three ending fields means lap-button press. Pace targets are converted to Garmin's metres-per-second bounds with the faster limit first.
+
+### Heart-rate cap example
+
+Garmin workout intensity targets are ranges rather than one-sided limits. `heart_rate_max` uses Garmin's 35 bpm custom-workout floor as the lower boundary, making it an effective upper-cap alert during a normal run:
+
+```yaml
+sport: running
+name: "HR cap progression"
+steps:
+  - { type: warmup, duration: "10:00", heart_rate_max: 120 }
+  - { type: interval, duration: "15:00", heart_rate_max: 140 }
+  - { type: cooldown, duration: "10:00", heart_rate_max: 120 }
+```
+
+Use `heart_rate: [120, 140]` when the watch should alert at both the lower and upper boundary. Use `heart_rate_zone: 2` when the workout should follow the running HR zones currently configured in Garmin.
 
 ## Dated plan YAML
 

@@ -1,5 +1,6 @@
 from garminworkouts.models.distance import Distance
 from garminworkouts.models.duration import Duration
+from garminworkouts.models.heart_rate import HeartRateRange, validate_heart_rate_zone
 from garminworkouts.models.pace import PaceRange
 
 
@@ -17,6 +18,7 @@ class RunningWorkout:
     _REPEAT_STEP_TYPE = {"stepTypeId": 6, "stepTypeKey": "repeat"}
 
     _NO_TARGET = {"workoutTargetTypeId": 1, "workoutTargetTypeKey": "no.target"}
+    _HEART_RATE_TARGET = {"workoutTargetTypeId": 4, "workoutTargetTypeKey": "heart.rate.zone"}
     _PACE_TARGET = {"workoutTargetTypeId": 6, "workoutTargetTypeKey": "pace.zone"}
 
     def __init__(self, config):
@@ -86,7 +88,29 @@ class RunningWorkout:
             if "pace" in step:
                 PaceRange.from_config(step["pace"])
 
-            supported = {"type", "duration", "distance", "lap_button", "pace", "description"}
+            target_fields = [
+                key for key in ("pace", "heart_rate", "heart_rate_max", "heart_rate_zone") if step.get(key) is not None
+            ]
+            if len(target_fields) > 1:
+                raise ValueError("A running step can have only one primary intensity target")
+            if "heart_rate" in step:
+                HeartRateRange.from_config(step["heart_rate"])
+            if "heart_rate_max" in step:
+                HeartRateRange.from_maximum(step["heart_rate_max"])
+            if "heart_rate_zone" in step:
+                validate_heart_rate_zone(step["heart_rate_zone"])
+
+            supported = {
+                "type",
+                "duration",
+                "distance",
+                "lap_button",
+                "pace",
+                "heart_rate",
+                "heart_rate_max",
+                "heart_rate_zone",
+                "description",
+            }
             unknown = set(step) - supported
             if unknown:
                 raise ValueError(f"Unsupported running step fields: {', '.join(sorted(unknown))}")
@@ -138,6 +162,7 @@ class RunningWorkout:
             "targetType": self._target_type(step_config),
             "targetValueOne": value_one,
             "targetValueTwo": value_two,
+            "zoneNumber": self._zone_number(step_config),
         }
         if step_config.get("description"):
             step["description"] = step_config["description"]
@@ -160,13 +185,27 @@ class RunningWorkout:
         return None
 
     def _target_type(self, step_config):
-        return self._PACE_TARGET if step_config.get("pace") else self._NO_TARGET
+        if step_config.get("pace"):
+            return self._PACE_TARGET
+        if any(step_config.get(key) is not None for key in ("heart_rate", "heart_rate_max", "heart_rate_zone")):
+            return self._HEART_RATE_TARGET
+        return self._NO_TARGET
 
     @staticmethod
     def _target_values(step_config):
-        if not step_config.get("pace"):
-            return None, None
-        return PaceRange.from_config(step_config["pace"]).to_speed_bounds()
+        if step_config.get("pace"):
+            return PaceRange.from_config(step_config["pace"]).to_speed_bounds()
+        if step_config.get("heart_rate") is not None:
+            return HeartRateRange.from_config(step_config["heart_rate"]).to_bpm_bounds()
+        if step_config.get("heart_rate_max") is not None:
+            return HeartRateRange.from_maximum(step_config["heart_rate_max"]).to_bpm_bounds()
+        return None, None
+
+    @staticmethod
+    def _zone_number(step_config):
+        if step_config.get("heart_rate_zone") is None:
+            return None
+        return validate_heart_rate_zone(step_config["heart_rate_zone"])
 
     def _estimated_duration(self, steps_config):
         total = 0
