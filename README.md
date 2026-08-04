@@ -1,228 +1,161 @@
-# Garmin Connect Workouts Tools
+# Garmin Running Workouts Import
 
-[![CI](https://github.com/mkuthan/garmin-workouts/actions/workflows/ci.yml/badge.svg)](https://github.com/mkuthan/garmin-workouts/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/mkuthan/garmin-workouts/branch/master/graph/badge.svg?token=ZC7VITLNHF)](https://codecov.io/gh/mkuthan/garmin-workouts)
+Create structured running workouts from readable YAML, upload them to Garmin Connect, and place them on the Garmin calendar so they sync to a compatible watch. Cycling/FTP workouts from the upstream project remain supported.
 
-Command line tools for managing Garmin Connect workouts.
+> Garmin does not publish the web endpoints used by this tool. Garmin may change them without notice, and authentication can occasionally require maintenance.
 
-Features:
+## What this fork adds
 
-* Target power is set according to Your current FTP.
-* All workouts under Your control stored as JSON files.
-* Easy to understand workout format, see examples below.
-* Workout parts like warm-up or cool-down are reusable.
-* Schedule saved workouts
-* The most important parameters (TSS, IF, NP) embedded in workout description field.
+- Running workouts with warm-up, interval, recovery, rest, cooldown, and other step types.
+- Time, distance, or lap-button step endings.
+- Pace ranges written naturally as `5:25-5:30` or `["5:25", "5:30"]` per kilometre.
+- Explicit repeat groups.
+- Dated multi-week plans in one YAML file.
+- Preview-first operation: no Garmin login or changes until `--apply` is supplied.
+- Create-or-update by workout name and duplicate-safe calendar scheduling.
+- Validation for ISO dates and watch-visible name collisions in the first 15 characters.
 
 ## Installation
 
-Requirements:
-
-* Python 3.x ([doc](https://www.python.org/downloads/))
-* uv ([doc](https://docs.astral.sh/uv/))
-
-Clone this repo:
+Python 3.10-3.14 and [uv](https://docs.astral.sh/uv/) are required.
 
 ```shell
-git clone https://github.com/mkuthan/garmin-workouts.git
-```
-
-Install dependencies with uv:
-
-```shell
-cd garmin-workouts
+git clone https://github.com/OWNER/garmin-running-workouts-import.git
+cd garmin-running-workouts-import
 uv sync --dev
 ```
 
-Optionally, install tool versions from `mise.toml` first:
+## Preview a four-week plan
+
+Previewing is offline and does not require Garmin credentials:
 
 ```shell
-mise install
+uv run garmin-workouts plan sample_plans/running-4-week-example.yaml
 ```
 
-## Usage
+The command prints the exact Garmin payloads and makes no remote changes.
 
-First call to Garmin Connect takes some time to authenticate user.
-Once user is authenticated [cookie jar](https://docs.python.org/3/library/http.cookiejar.html) is created with session
-cookies for further calls.
-It is required due to strict request limits for Garmin [SSO](https://en.wikipedia.org/wiki/Single_sign-on) service.
+## Apply and schedule a plan
 
-### Authentication
-
-Define Garmin connect account credentials as `GARMIN_USERNAME` and `GARMIN_PASSWORD` environment variables:
+Keep credentials local. Never put them in a workout plan, commit them, or share them in chat.
 
 ```shell
-export GARMIN_USERNAME=username
-export GARMIN_PASSWORD=password
+cp .env.example .env
+chmod 600 .env
 ```
 
-Alternatively use `-u` and `-p` command line arguments:
+Fill in `GARMIN_USERNAME` and `GARMIN_PASSWORD` in `.env`, then run. The CLI loads this local file automatically:
 
 ```shell
-uv run garmin-workouts -u [USERNAME] -p [PASSWORD]
+uv run garmin-workouts plan sample_plans/running-4-week-example.yaml --apply
 ```
 
-### Import Workouts
+Applying a plan:
 
-Import workouts into Garmin Connect from definitions in [YAML](https://yaml.org) files.
-If the workout already exists it will be updated:
+1. Finds existing Garmin workouts by their full name.
+2. Updates an existing definition or creates it and captures its Garmin ID.
+3. Checks the Garmin calendar month by month.
+4. Schedules only workout/date combinations that are not already present.
 
-```shell
-uv run garmin-workouts import --ftp [YOUR_FTP] 'sample_workouts/*.yaml'
-```
+Use `--upload-only` with `--apply` to create the workout library entries without scheduling them.
 
-Sample workout definition:
+After applying, sync Garmin Connect with the watch. A scheduled workout should appear for its calendar day under the watch's running workouts/calendar flow.
+
+## Running workout YAML
 
 ```yaml
-name: "Boring as hell but simple workout"
+sport: running
+name: "6x2 @ 5:25"
+description: "Controlled two-minute repetitions"
 
 steps:
-  - { power: 50, duration: "10:00" }
-  - { power: 70, duration: "20:00" }
-  - { duration: "5:00" }
-  - { power: 70, duration: "20:00" }
-  - { power: 50 }
+  - { type: warmup, duration: "15:00" }
+  - repeat: 6
+    steps:
+      - { type: interval, duration: "2:00", pace: ["5:25", "5:30"] }
+      - { type: recovery, duration: "1:30" }
+  - { type: cooldown, duration: "10:00" }
 ```
 
-* Target power is defined as percent of FTP (provided as mandatory command line parameter).
-If the target power is not specified "No target" will be used for the workout step.
-* Target power may be defined as absolute value like: "150W", it could be useful in FTP ramp tests.
-* Duration is defined as HH:MM:SS (or MM:SS, or SS) format.
-If the duration is not specified "Lap Button Press" will be used to move into next workout step.
+Supported running fields:
 
-Reusing workout definitions:
+| Field | Examples | Meaning |
+|---|---|---|
+| `type` | `warmup`, `interval`, `recovery`, `rest`, `cooldown`, `other` | Garmin step type; defaults to `interval` |
+| `duration` | `"2:00"`, `"1:05:00"` | End after time |
+| `distance` | `400`, `"400m"`, `"10.3km"` | End after distance |
+| `lap_button` | `true` | End when the lap button is pressed |
+| `pace` | `"5:25-5:30"` | Pace alert range in min/km |
+| `description` | free text | Optional step instruction |
+
+Use only one ending condition per step. Omitting all three ending fields means lap-button press. Pace targets are converted to Garmin's metres-per-second bounds with the faster limit first.
+
+## Dated plan YAML
 
 ```yaml
-name: "Boring as hell but simple workout"
-
-steps:
-  - !include inc/warmup.yaml
-  - { power: 70, duration: "20:00" }
-  - { duration: "5:00" }
-  - { power: 70, duration: "20:00" }
-  - !include inc/cooldown.yaml
+name: "Four-week block"
+workouts:
+  - date: 2026-08-11
+    sport: running
+    name: "260811 Q 6x2"
+    description: "Quality session"
+    steps:
+      - { type: warmup, duration: "15:00" }
+      - repeat: 6
+        steps:
+          - { type: interval, duration: "2:00", pace: "5:25-5:30" }
+          - { type: recovery, duration: "1:30" }
+      - { type: cooldown, duration: "10:00" }
 ```
 
-* `!include` is a custom YAML directive for including another file as a part of the workout.
+Putting `YYMMDD` at the beginning of each name makes a workout easy to identify on the watch. The tool rejects different names that would look identical when only their first 15 characters are visible.
 
-Reusing workout steps:
-
-```yaml
-name: "Boring as hell but simple workout"
-
-steps:
-  - !include inc/warmup.yaml
-  - &INTERVAL { power: 70, duration: "20:00" }
-  - { duration: "5:00" }
-  - *INTERVAL
-  - !include inc/cooldown.yaml
-```
-
-* Thanks to YAML aliases, workout steps can be easily reused once defined.
-
-Sample Over-Under workout:
-
-```yaml
-name: "OverUnder 3x9"
-
-steps:
-  - !include inc/warmup.yaml
-  - &INTERVAL
-    - &UNDER { power: 95, duration: "2:00" }
-    - &OVER { power: 105, duration: "1:00" }
-    - *UNDER
-    - *OVER
-    - *UNDER
-    - *OVER
-    - { power: 50, duration: "3:00" }
-  - *INTERVAL
-  - *INTERVAL
-  - !include inc/cooldown.yaml
-```
-
-* All nested sections are mapped as repeated steps in Garmin Connect.
-First repeat for warmup, second repeat for main interval (repeated 3 times) and the last one for cool down.
-
-To import your workout from an `xlsx` file, construct a table in Excel that looks like this (making sure that all Excel
-cells are set to text and not to date or any other format):
-
-| Start | End | Duration |
-|-------|-----|----------|
-| 43    | 85  | 3:00     |
-| 85    |     | 15:00    |
-| 85    | 43  | 2:00     |
-
-If your "start" and "end" power for a step differ, a ramp of 10 seconds steps will be created by default for the chosen
-duration. If more than 50 total steps are to be uploaded ramp's steps will get longer so that the total number of steps
-is under Garmin maximum value of 50. **TIPS** *Do not use your TACX without the power cable as your Garmin will have a
-hard time controlling the trainer while changing from one step to the next. Turn off the tones in your Garmin.* If you
-wish to give your values in W instead of % of your FTP:
-
-| Start | End  | Duration |
-|-------|------|----------|
-| 80W   | 160W | 3:00     |
-| 160W  |      | 15:00    |
-| 160W  | 80W  | 2:00     |
-
-You can then import as with the `yaml` files:
+## Import a single workout
 
 ```shell
-uv run garmin-workouts import --ftp [YOUR_FTP] my.workout.xlsx
+uv run garmin-workouts import sample_workouts/running-6x2.yaml
 ```
 
-This will generate a `yaml` file with the name `my.workout.xlsx`. The name of the workout will be "my.workout".
-
-### Export Workouts
-
-Export all workouts from Garmin Connect into local directory as FIT files.
-This is the easiest way to synchronize all workouts with Garmin device:
+The original cycling format remains available and still requires FTP:
 
 ```shell
-uv run garmin-workouts export /mnt/GARMIN/NewFiles
+uv run garmin-workouts import --ftp 250 'sample_workouts/*.yaml'
 ```
 
-### List Workouts
-
-Print summary for all workouts (workout identifier, workout name and description):
+Other upstream commands remain available:
 
 ```shell
-$ uv run garmin-workouts list
-188952654 VO2MAX 5x4           FTP 214, TSS 80, NP 205, IF 0.96
-188952362 TEMPO 3x15           FTP 214, TSS 68, NP 172, IF 0.81
-188952359 SS 3x12              FTP 214, TSS 65, NP 178, IF 0.83
-188952356 VO2MAX 5x3           FTP 214, TSS 63, NP 202, IF 0.95
-188952357 OU 3x9               FTP 214, TSS 62, NP 188, IF 0.88
-188952354 SS 4x9               FTP 214, TSS 65, NP 178, IF 0.83
-188952350 TEMPO 3x10           FTP 214, TSS 49, NP 169, IF 0.79
-188952351 TEMPO 3x12           FTP 214, TSS 57, NP 171, IF 0.80
-188952349 OU 3x6               FTP 214, TSS 47, NP 181, IF 0.85
-188952348 SS 6x6               FTP 214, TSS 65, NP 178, IF 0.83
-127739603 FTP RAMP             FTP 214, TSS 62, NP 230, IF 1.08
+uv run garmin-workouts list
+uv run garmin-workouts get --id WORKOUT_ID
+uv run garmin-workouts schedule --date 2026-08-11 --workout_id WORKOUT_ID
+uv run garmin-workouts export ./exported-workouts
 ```
 
-### Get Workout
+## Four-week FIT-driven workflow
 
-Print full workout definition (as JSON):
+The importer deliberately separates training decisions from delivery:
+
+1. Export and review the latest FIT activities.
+2. Generate a dated four-week YAML block from progress, recovery, and current goals.
+3. Preview and validate the block locally.
+4. Explicitly apply it to Garmin Connect.
+5. Reassess before the next block rather than automatically advancing after one activity.
+
+The example plan demonstrates this workflow, but it is not medical clearance. The athlete remains responsible for symptom, blood-pressure, recovery, and clinician-defined stop rules before starting a scheduled workout.
+
+## Security and limitations
+
+- `.env`, `.venv`, and Garmin cookie jars are ignored by Git.
+- Use a unique Garmin password and protect `.env` with local file permissions.
+- Do not run an unattended cloud job containing Garmin credentials.
+- Garmin's private endpoints, MFA, CAPTCHA, or SSO changes can break authentication.
+- Reapplying a plan is designed to be repeatable, but deleting or moving old calendar entries remains a manual Garmin Connect action.
+
+## Development
 
 ```shell
-$ uv run garmin-workouts get --id [WORKOUT_ID]
-{"workoutId": 188952654, "ownerId": 2043461, "workoutName": "VO2MAX 5x4", "description": "FTP 214, TSS 80, NP 205, IF 0.96", "updatedDate": "2020-02-11T14:37:56.0", ...
+uv sync --dev
+mise run check
 ```
 
-### Delete Workout
-
-Permanently delete workout from Garmin Connect:
-
-```shell
-uv run garmin-workouts delete --id [WORKOUT_ID]
-```
-
-### Schedule  Workouts
-
-Schedule preexisting workouts using the workout number (e.g. "<https://connect.garmin.com/modern/workout/234567894>")
-The workout number is the last digits of the URL here: 234567894
-Note: the date format is as follows : 2021-12-31
-
-```shell
-uv run garmin-workouts schedule -d [DATE] -w [WORKOUT_ID]
-```
+This fork is based on [mkuthan/garmin-workouts](https://github.com/mkuthan/garmin-workouts) and remains available under the Apache-2.0 license.

@@ -13,8 +13,13 @@ __pycache__/
 # Environments
 .env
 .venv
+*.egg-info/
 env/
 venv/
+
+# Garmin authentication sessions
+.garmin-cookies.txt
+*.garmin-cookies.txt
 
 # VS Code
 .vscode/

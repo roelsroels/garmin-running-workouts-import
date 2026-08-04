@@ -176,6 +176,22 @@ class GarminClientTestCase(unittest.TestCase):
         with self.client as connection:
             self.assertRaises(requests.exceptions.HTTPError, connection.schedule_workout, workout_id, date)
 
+    def test_list_scheduled_workouts(self):
+        year = 2026
+        month = 8
+        scheduled = [{"workoutId": 1, "date": "2026-08-11"}]
+
+        url = f"{GarminClient._WORKOUT_SERVICE_ENDPOINT}/schedule/year/{year}/month/{month - 1}"
+        self.httpserver.expect_request(url).respond_with_json(scheduled)
+
+        with self.client as connection:
+            self.assertEqual(connection.list_scheduled_workouts(year, month), scheduled)
+
+    def test_list_scheduled_workouts_rejects_invalid_month(self):
+        with self.client as connection:
+            with self.assertRaises(ValueError):
+                connection.list_scheduled_workouts(2026, 13)
+
 
 if __name__ == "__main__":
     unittest.main()

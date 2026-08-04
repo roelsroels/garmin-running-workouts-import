@@ -1,0 +1,11 @@
+sport: running
+name: "6x2 @ 5:25"
+description: "15 min warm-up, 6 x 2 min controlled with 90 sec recovery, 10 min cool-down"
+
+steps:
+  - { type: warmup, duration: "15:00" }
+  - repeat: 6
+    steps:
+      - { type: interval, duration: "2:00", pace: ["5:25", "5:30"] }
+      - { type: recovery, duration: "1:30" }
+  - { type: cooldown, duration: "10:00" }

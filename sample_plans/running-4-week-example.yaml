@@ -1,0 +1,120 @@
+name: "Four-week running block example"
+
+# Illustrative logistics example, not automatic medical clearance. Review each
+# block against recovery, symptoms, blood pressure, and the current training goal.
+workouts:
+  # Week 1 - introduce controlled two-minute repetitions
+  - date: 2026-08-11
+    sport: running
+    name: "260811 Q 6x2"
+    description: "15 min easy; 6 x 2 min at 5:25-5:30/km with 90 sec easy; 10 min easy"
+    steps:
+      - { type: warmup, duration: "15:00" }
+      - repeat: 6
+        steps:
+          - { type: interval, duration: "2:00", pace: ["5:25", "5:30"] }
+          - { type: recovery, duration: "1:30" }
+      - { type: cooldown, duration: "10:00" }
+
+  - date: 2026-08-13
+    sport: running
+    name: "260813 Easy40"
+    description: "Forty minutes easy; conversational effort, no pace target"
+    steps:
+      - { type: warmup, duration: "5:00" }
+      - { type: interval, duration: "30:00" }
+      - { type: cooldown, duration: "5:00" }
+
+  - date: 2026-08-16
+    sport: running
+    name: "260816 Long103"
+    description: "10.3 km easy; do not chase pace"
+    steps:
+      - { type: interval, distance: "10.3km" }
+
+  # Week 2 - longer quality repetitions while holding the long run
+  - date: 2026-08-18
+    sport: running
+    name: "260818 Q 5x3"
+    description: "15 min easy; 5 x 3 min at 5:25-5:30/km with 90 sec easy; 10 min easy"
+    steps:
+      - { type: warmup, duration: "15:00" }
+      - repeat: 5
+        steps:
+          - { type: interval, duration: "3:00", pace: ["5:25", "5:30"] }
+          - { type: recovery, duration: "1:30" }
+      - { type: cooldown, duration: "10:00" }
+
+  - date: 2026-08-20
+    sport: running
+    name: "260820 Easy35"
+    description: "Thirty-five minutes easy; conversational effort"
+    steps:
+      - { type: warmup, duration: "5:00" }
+      - { type: interval, duration: "25:00" }
+      - { type: cooldown, duration: "5:00" }
+
+  - date: 2026-08-23
+    sport: running
+    name: "260823 Long103"
+    description: "Hold the long run at 10.3 km during the quality-progression week"
+    steps:
+      - { type: interval, distance: "10.3km" }
+
+  # Week 3 - hold quality and make the only volume increase
+  - date: 2026-08-25
+    sport: running
+    name: "260825 Q 5x3"
+    description: "Repeat last week's quality session without increasing speed"
+    steps:
+      - { type: warmup, duration: "15:00" }
+      - repeat: 5
+        steps:
+          - { type: interval, duration: "3:00", pace: ["5:25", "5:30"] }
+          - { type: recovery, duration: "1:30" }
+      - { type: cooldown, duration: "10:00" }
+
+  - date: 2026-08-27
+    sport: running
+    name: "260827 Easy35"
+    description: "Thirty-five minutes easy; conversational effort"
+    steps:
+      - { type: warmup, duration: "5:00" }
+      - { type: interval, duration: "25:00" }
+      - { type: cooldown, duration: "5:00" }
+
+  - date: 2026-08-30
+    sport: running
+    name: "260830 Long110"
+    description: "11.0 km easy only if the long-run progression gate is met"
+    steps:
+      - { type: interval, distance: "11km" }
+
+  # Week 4 - recovery/consolidation
+  - date: 2026-09-01
+    sport: running
+    name: "260901 Q 4x2"
+    description: "Reduced quality volume; stay controlled"
+    steps:
+      - { type: warmup, duration: "15:00" }
+      - repeat: 4
+        steps:
+          - { type: interval, duration: "2:00", pace: ["5:25", "5:30"] }
+          - { type: recovery, duration: "1:30" }
+      - { type: cooldown, duration: "10:00" }
+
+  - date: 2026-09-03
+    sport: running
+    name: "260903 Easy35"
+    description: "Thirty-five minutes easy; conversational effort"
+    steps:
+      - { type: warmup, duration: "5:00" }
+      - { type: interval, duration: "25:00" }
+      - { type: cooldown, duration: "5:00" }
+
+  - date: 2026-09-06
+    sport: running
+    name: "260906 Long090"
+    description: "Recovery-week long run: 9 km easy"
+    steps:
+      - { type: interval, distance: "9km" }
