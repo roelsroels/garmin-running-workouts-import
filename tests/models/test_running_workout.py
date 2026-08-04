@@ -69,7 +69,7 @@ def test_create_running_workout_with_heart_rate_caps_range_and_zone():
         {"type": "sprint", "duration": "1:00"},
         {"type": "interval", "duration": "1:00", "distance": "200m"},
         {"repeat": 1, "steps": [{"duration": "1:00"}]},
-        {"type": "interval", "duration": "1:00", "power": 200},
+        {"type": "interval", "duration": "1:00", "unsupported_target": 200},
         {"type": "interval", "duration": "1:00", "pace": "5:00-5:10", "heart_rate_max": 140},
         {"type": "interval", "duration": "1:00", "heart_rate_zone": 6},
     ],

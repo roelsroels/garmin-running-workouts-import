@@ -59,10 +59,35 @@ def test_apply_creates_once_and_schedules_both_dates():
 
 
 def test_apply_updates_existing_and_skips_existing_schedule():
-    existing = [{"workoutId": 7, "ownerId": 8, "workoutName": "W1Q 6x2 525", "description": "old"}]
+    existing = [
+        {
+            "workoutId": 7,
+            "ownerId": 8,
+            "workoutName": "W1Q 6x2 525",
+            "description": "old",
+            "sportType": {"sportTypeId": 1, "sportTypeKey": "running"},
+        }
+    ]
     scheduled = [{"workoutId": 7, "date": "2026-08-11"}]
     connection = FakeConnection(existing, scheduled)
     actions = PlanApplier(_plan(), connection).apply()
     assert connection.updated[0][0] == 7
     assert connection.scheduled_calls == [(7, "2026-08-18")]
     assert [action["action"] for action in actions] == ["updated", "schedule-skipped", "scheduled"]
+
+
+def test_apply_ignores_existing_non_running_workout_with_same_name():
+    existing = [
+        {
+            "workoutId": 7,
+            "ownerId": 8,
+            "workoutName": "W1Q 6x2 525",
+            "description": "other sport",
+            "sportType": {"sportTypeId": 3, "sportTypeKey": "other"},
+        }
+    ]
+    connection = FakeConnection(existing)
+    actions = PlanApplier(_plan(), connection).apply(schedule=False)
+    assert len(connection.saved) == 1
+    assert not connection.updated
+    assert actions[0]["action"] == "created"

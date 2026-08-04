@@ -12,7 +12,6 @@ from garminworkouts.config import configreader
 from garminworkouts.garmin.garminclient import GarminClient
 from garminworkouts.models.running_workout import RunningWorkout
 from garminworkouts.models.training_plan import TrainingPlan
-from garminworkouts.models.workout import Workout
 from garminworkouts.plan import PlanApplier, preview_plan
 from garminworkouts.utils.envdefault import EnvDefault
 from garminworkouts.utils.validators import writeable_dir
@@ -24,18 +23,22 @@ def command_import(args):
         raise ValueError(f"No workout files match '{args.workout}'")
 
     workout_configs = [configreader.read_config(workout_file) for workout_file in workout_files]
-    workouts = [_workout_from_config(config, args.ftp, args.target_power_diff) for config in workout_configs]
+    workouts = [_running_workout_from_config(config) for config in workout_configs]
 
     with _garmin_client(args) as connection:
-        existing_workouts_by_name = {Workout.extract_workout_name(w): w for w in connection.list_workouts()}
+        existing_workouts_by_name = {
+            RunningWorkout.extract_workout_name(w): w
+            for w in connection.list_workouts()
+            if RunningWorkout.is_running(w)
+        }
 
         for workout in workouts:
             workout_name = workout.get_workout_name()
             existing_workout = existing_workouts_by_name.get(workout_name)
 
             if existing_workout:
-                workout_id = Workout.extract_workout_id(existing_workout)
-                workout_owner_id = Workout.extract_workout_owner_id(existing_workout)
+                workout_id = RunningWorkout.extract_workout_id(existing_workout)
+                workout_owner_id = RunningWorkout.extract_workout_owner_id(existing_workout)
                 payload = workout.create_workout(workout_id, workout_owner_id)
                 logging.info("Updating workout '%s'", workout_name)
                 connection.update_workout(workout_id, payload)
@@ -47,7 +50,7 @@ def command_import(args):
 
 def command_plan(args):
     plan_config = configreader.read_config(args.plan)
-    plan = TrainingPlan(plan_config, args.ftp, args.target_power_diff)
+    plan = TrainingPlan(plan_config)
 
     if not args.apply:
         print(preview_plan(plan))
@@ -61,8 +64,10 @@ def command_plan(args):
 def command_export(args):
     with _garmin_client(args) as connection:
         for workout in connection.list_workouts():
-            workout_id = Workout.extract_workout_id(workout)
-            workout_name = Workout.extract_workout_name(workout)
+            if not RunningWorkout.is_running(workout):
+                continue
+            workout_id = RunningWorkout.extract_workout_id(workout)
+            workout_name = RunningWorkout.extract_workout_name(workout)
             file = os.path.join(args.directory, str(workout_id)) + ".fit"
             logging.info("Exporting workout '%s' into '%s'", workout_name, file)
             connection.download_workout(workout_id, file)
@@ -71,7 +76,9 @@ def command_export(args):
 def command_list(args):
     with _garmin_client(args) as connection:
         for workout in connection.list_workouts():
-            Workout.print_workout_summary(workout)
+            if not RunningWorkout.is_running(workout):
+                continue
+            RunningWorkout.print_workout_summary(workout)
 
 
 def command_schedule(args):
@@ -84,7 +91,7 @@ def command_schedule(args):
 def command_get(args):
     with _garmin_client(args) as connection:
         workout = connection.get_workout(args.id)
-        Workout.print_workout_json(workout)
+        RunningWorkout.print_workout_json(workout)
 
 
 def command_delete(args):
@@ -108,15 +115,11 @@ def _garmin_client(args):
     )
 
 
-def _workout_from_config(config, ftp=None, target_power_diff=0.05):
-    sport = config.get("sport", "cycling")
-    if sport == "running":
-        return RunningWorkout(config)
-    if sport == "cycling":
-        if ftp is None:
-            raise ValueError("Cycling workouts require --ftp")
-        return Workout(config, ftp, target_power_diff)
-    raise ValueError(f"Unsupported sport '{sport}', expected running or cycling")
+def _running_workout_from_config(config):
+    sport = config.get("sport", "running")
+    if sport != "running":
+        raise ValueError(f"Unsupported sport '{sport}'; this tool supports running workouts only")
+    return RunningWorkout(config)
 
 
 def main():
@@ -151,13 +154,6 @@ def main():
     parser_import.add_argument(
         "workout", help="File(s) with workout(s) to import, wildcards are supported e.g: sample_workouts/*.yaml"
     )
-    parser_import.add_argument("--ftp", type=int, help="FTP for cycling workouts; not needed for running workouts")
-    parser_import.add_argument(
-        "--target-power-diff",
-        default=0.05,
-        type=float,
-        help="Percent of target power to calculate final target power range",
-    )
     parser_import.set_defaults(func=command_import)
 
     parser_plan = subparsers.add_parser(
@@ -168,13 +164,6 @@ def main():
     parser_plan.add_argument("--apply", action="store_true", help="Create/update workouts and schedule them")
     parser_plan.add_argument(
         "--upload-only", action="store_true", help="Create/update workouts but do not place them on the calendar"
-    )
-    parser_plan.add_argument("--ftp", type=int, help="FTP when the plan also contains cycling workouts")
-    parser_plan.add_argument(
-        "--target-power-diff",
-        default=0.05,
-        type=float,
-        help="Percent of target power used for cycling target ranges",
     )
     parser_plan.set_defaults(func=command_plan)
 

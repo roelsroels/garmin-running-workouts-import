@@ -1,7 +1,7 @@
 import json
 from collections import defaultdict
 
-from garminworkouts.models.workout import Workout
+from garminworkouts.models.running_workout import RunningWorkout
 from garminworkouts.utils.functional import filter_empty
 
 
@@ -19,8 +19,8 @@ class PlanApplier:
             name = workout.get_workout_name()
             existing = existing_by_name.get(name)
             if existing:
-                workout_id = Workout.extract_workout_id(existing)
-                owner_id = Workout.extract_workout_owner_id(existing)
+                workout_id = RunningWorkout.extract_workout_id(existing)
+                owner_id = RunningWorkout.extract_workout_owner_id(existing)
                 payload = workout.create_workout(workout_id, owner_id)
                 self.connection.update_workout(workout_id, payload)
                 actions.append({"action": "updated", "name": name, "workout_id": workout_id})
@@ -55,7 +55,9 @@ class PlanApplier:
     def _existing_workouts_by_name(self):
         workouts = defaultdict(list)
         for workout in self.connection.list_workouts():
-            workouts[Workout.extract_workout_name(workout)].append(workout)
+            if not RunningWorkout.is_running(workout):
+                continue
+            workouts[RunningWorkout.extract_workout_name(workout)].append(workout)
         duplicates = [name for name, items in workouts.items() if len(items) > 1]
         if duplicates:
             raise ValueError(f"Garmin Connect contains duplicate workout names: {', '.join(sorted(duplicates))}")
@@ -63,9 +65,9 @@ class PlanApplier:
 
     def _find_created_workout_id(self, workout_name):
         matches = [
-            Workout.extract_workout_id(workout)
+            RunningWorkout.extract_workout_id(workout)
             for workout in self.connection.list_workouts()
-            if Workout.extract_workout_name(workout) == workout_name
+            if RunningWorkout.is_running(workout) and RunningWorkout.extract_workout_name(workout) == workout_name
         ]
         if len(matches) != 1:
             raise RuntimeError(

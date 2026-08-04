@@ -1,7 +1,10 @@
+import json
+
 from garminworkouts.models.distance import Distance
 from garminworkouts.models.duration import Duration
 from garminworkouts.models.heart_rate import HeartRateRange, validate_heart_rate_zone
 from garminworkouts.models.pace import PaceRange
+from garminworkouts.utils.functional import filter_empty
 
 
 class RunningWorkout:
@@ -27,6 +30,38 @@ class RunningWorkout:
 
     def get_workout_name(self):
         return self.config["name"]
+
+    @staticmethod
+    def extract_workout_id(workout):
+        return workout["workoutId"]
+
+    @staticmethod
+    def extract_workout_name(workout):
+        return workout["workoutName"]
+
+    @staticmethod
+    def extract_workout_description(workout):
+        return workout["description"]
+
+    @staticmethod
+    def extract_workout_owner_id(workout):
+        return workout["ownerId"]
+
+    @staticmethod
+    def is_running(workout):
+        sport_type = workout.get("sportType") or {}
+        return sport_type.get("sportTypeId") == 1 or sport_type.get("sportTypeKey") == "running"
+
+    @staticmethod
+    def print_workout_json(workout):
+        print(json.dumps(filter_empty(workout)))
+
+    @staticmethod
+    def print_workout_summary(workout):
+        workout_id = RunningWorkout.extract_workout_id(workout)
+        workout_name = RunningWorkout.extract_workout_name(workout)
+        workout_description = RunningWorkout.extract_workout_description(workout)
+        print(f"{workout_id} {workout_name:20} {workout_description}")
 
     def create_workout(self, workout_id=None, workout_owner_id=None):
         payload = {
