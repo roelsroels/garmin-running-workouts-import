@@ -58,12 +58,14 @@ class GarminClient:
 
         response = self.session.post(url, headers=GarminClient._REQUIRED_HEADERS, json=workout)
         response.raise_for_status()
+        return self._optional_json(response)
 
     def update_workout(self, workout_id, workout):
         url = f"{self.connect_url}{GarminClient._WORKOUT_SERVICE_ENDPOINT}/workout/{workout_id}"
 
         response = self.session.put(url, headers=GarminClient._REQUIRED_HEADERS, json=workout)
         response.raise_for_status()
+        return self._optional_json(response)
 
     def delete_workout(self, workout_id):
         url = f"{self.connect_url}{GarminClient._WORKOUT_SERVICE_ENDPOINT}/workout/{workout_id}"
@@ -77,3 +79,21 @@ class GarminClient:
 
         response = self.session.post(url, headers=GarminClient._REQUIRED_HEADERS, json=json_data)
         response.raise_for_status()
+        return self._optional_json(response)
+
+    def list_scheduled_workouts(self, year, month):
+        if not 1 <= int(month) <= 12:
+            raise ValueError(f"Month must be between 1 and 12 but was {month}")
+        url = (
+            f"{self.connect_url}{GarminClient._WORKOUT_SERVICE_ENDPOINT}"
+            f"/schedule/year/{int(year)}/month/{int(month) - 1}"
+        )
+        response = self.session.get(url, headers=GarminClient._REQUIRED_HEADERS)
+        response.raise_for_status()
+        return self._optional_json(response) or []
+
+    @staticmethod
+    def _optional_json(response):
+        if not response.content:
+            return None
+        return response.json()

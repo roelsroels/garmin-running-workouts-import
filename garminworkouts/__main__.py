@@ -2,21 +2,29 @@
 
 import argparse
 import glob
+import json
 import logging
 import os
 
+from dotenv import load_dotenv
+
 from garminworkouts.config import configreader
 from garminworkouts.garmin.garminclient import GarminClient
+from garminworkouts.models.running_workout import RunningWorkout
+from garminworkouts.models.training_plan import TrainingPlan
 from garminworkouts.models.workout import Workout
+from garminworkouts.plan import PlanApplier, preview_plan
 from garminworkouts.utils.envdefault import EnvDefault
 from garminworkouts.utils.validators import writeable_dir
 
 
 def command_import(args):
     workout_files = glob.glob(args.workout)
+    if not workout_files:
+        raise ValueError(f"No workout files match '{args.workout}'")
 
     workout_configs = [configreader.read_config(workout_file) for workout_file in workout_files]
-    workouts = [Workout(workout_config, args.ftp, args.target_power_diff) for workout_config in workout_configs]
+    workouts = [_workout_from_config(config, args.ftp, args.target_power_diff) for config in workout_configs]
 
     with _garmin_client(args) as connection:
         existing_workouts_by_name = {Workout.extract_workout_name(w): w for w in connection.list_workouts()}
@@ -35,6 +43,19 @@ def command_import(args):
                 payload = workout.create_workout()
                 logging.info("Creating workout '%s'", workout_name)
                 connection.save_workout(payload)
+
+
+def command_plan(args):
+    plan_config = configreader.read_config(args.plan)
+    plan = TrainingPlan(plan_config, args.ftp, args.target_power_diff)
+
+    if not args.apply:
+        print(preview_plan(plan))
+        return
+
+    with _garmin_client(args) as connection:
+        actions = PlanApplier(plan, connection).apply(schedule=not args.upload_only)
+    print(json.dumps({"plan": plan.name, "actions": actions}, indent=2))
 
 
 def command_export(args):
@@ -73,6 +94,11 @@ def command_delete(args):
 
 
 def _garmin_client(args):
+    if not args.username or not args.password:
+        raise ValueError(
+            "Garmin credentials are required for this command. Set GARMIN_USERNAME and GARMIN_PASSWORD "
+            "or pass --username and --password before the command name."
+        )
     return GarminClient(
         connect_url=args.connect_url,
         sso_url=args.sso_url,
@@ -82,7 +108,19 @@ def _garmin_client(args):
     )
 
 
+def _workout_from_config(config, ftp=None, target_power_diff=0.05):
+    sport = config.get("sport", "cycling")
+    if sport == "running":
+        return RunningWorkout(config)
+    if sport == "cycling":
+        if ftp is None:
+            raise ValueError("Cycling workouts require --ftp")
+        return Workout(config, ftp, target_power_diff)
+    raise ValueError(f"Unsupported sport '{sport}', expected running or cycling")
+
+
 def main():
+    load_dotenv()
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter, description="Manage Garmin Connect workout(s)"
     )
@@ -91,7 +129,7 @@ def main():
         "-u",
         action=EnvDefault,
         env_var="GARMIN_USERNAME",
-        required=True,
+        required=False,
         help="Garmin Connect account username",
     )
     parser.add_argument(
@@ -99,7 +137,7 @@ def main():
         "-p",
         action=EnvDefault,
         env_var="GARMIN_PASSWORD",
-        required=True,
+        required=False,
         help="Garmin Connect account password",
     )
     parser.add_argument("--cookie-jar", default=".garmin-cookies.txt", help="Filename with authentication cookies")
@@ -113,9 +151,7 @@ def main():
     parser_import.add_argument(
         "workout", help="File(s) with workout(s) to import, wildcards are supported e.g: sample_workouts/*.yaml"
     )
-    parser_import.add_argument(
-        "--ftp", required=True, type=int, help="FTP to calculate absolute target power from relative value"
-    )
+    parser_import.add_argument("--ftp", type=int, help="FTP for cycling workouts; not needed for running workouts")
     parser_import.add_argument(
         "--target-power-diff",
         default=0.05,
@@ -123,6 +159,24 @@ def main():
         help="Percent of target power to calculate final target power range",
     )
     parser_import.set_defaults(func=command_import)
+
+    parser_plan = subparsers.add_parser(
+        "plan",
+        description="Preview or apply a dated training plan. Preview is the safe default; use --apply to upload.",
+    )
+    parser_plan.add_argument("plan", help="YAML file containing dated workout definitions")
+    parser_plan.add_argument("--apply", action="store_true", help="Create/update workouts and schedule them")
+    parser_plan.add_argument(
+        "--upload-only", action="store_true", help="Create/update workouts but do not place them on the calendar"
+    )
+    parser_plan.add_argument("--ftp", type=int, help="FTP when the plan also contains cycling workouts")
+    parser_plan.add_argument(
+        "--target-power-diff",
+        default=0.05,
+        type=float,
+        help="Percent of target power used for cycling target ranges",
+    )
+    parser_plan.set_defaults(func=command_plan)
 
     parser_export = subparsers.add_parser(
         "export", description="Export all workouts from Garmin Connect and save into directory"
