@@ -21,5 +21,8 @@ venv/
 .garmin-cookies.txt
 *.garmin-cookies.txt
 
+# Personalized dated plans stay local
+personal_plans/
+
 # VS Code
 .vscode/
