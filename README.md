@@ -36,6 +36,17 @@ uv run garmin-workouts plan sample_plans/running-4-week-example.yaml
 
 The command prints the exact Garmin payloads and makes no remote changes.
 
+### Keep personalized plans local
+
+The `personal_plans/` directory is ignored by Git so dated schedules, health-related
+instructions, and training details are not published with the repository. Create or
+place a plan there, then use the same preview-first workflow:
+
+```shell
+uv run garmin-workouts plan personal_plans/my-four-week-plan.yaml
+uv run garmin-workouts plan personal_plans/my-four-week-plan.yaml --apply
+```
+
 ## Apply and schedule a plan
 
 Keep credentials local. Never put them in a workout plan, commit them, or share them in chat.
