@@ -1,4 +1,5 @@
 import json
+from unittest.mock import patch
 
 from garminworkouts.models.training_plan import TrainingPlan
 from garminworkouts.plan import PlanApplier, preview_plan
@@ -91,3 +92,25 @@ def test_apply_ignores_existing_non_running_workout_with_same_name():
     assert len(connection.saved) == 1
     assert not connection.updated
     assert actions[0]["action"] == "created"
+
+
+def test_workout_id_is_extracted_from_nested_upload_response():
+    response = {"data": {"workout": {"workoutId": 123}}}
+    assert PlanApplier._workout_id_from_response(response) == 123
+
+
+def test_created_workout_lookup_retries_for_api_visibility():
+    created = {
+        "workoutId": 123,
+        "workoutName": "W1Q 6x2 525",
+        "sportType": {"sportTypeId": 1, "sportTypeKey": "running"},
+    }
+    connection = FakeConnection()
+    responses = iter([[], [created]])
+    connection.list_workouts = lambda: iter(next(responses))
+
+    with patch("garminworkouts.plan.time.sleep") as sleep:
+        workout_id = PlanApplier(_plan(), connection)._find_created_workout_id("W1Q 6x2 525")
+
+    assert workout_id == 123
+    sleep.assert_called_once_with(1)

@@ -107,11 +107,9 @@ def _garmin_client(args):
             "or pass --username and --password before the command name."
         )
     return GarminClient(
-        connect_url=args.connect_url,
-        sso_url=args.sso_url,
         username=args.username,
         password=args.password,
-        cookie_jar=args.cookie_jar,
+        token_store=args.token_store,
     )
 
 
@@ -143,9 +141,7 @@ def main():
         required=False,
         help="Garmin Connect account password",
     )
-    parser.add_argument("--cookie-jar", default=".garmin-cookies.txt", help="Filename with authentication cookies")
-    parser.add_argument("--connect-url", default="https://connect.garmin.com", help="Garmin Connect url")
-    parser.add_argument("--sso-url", default="https://sso.garmin.com", help="Garmin SSO url")
+    parser.add_argument("--token-store", default=".garmin-tokens", help="Directory for Garmin authentication tokens")
     parser.add_argument("--debug", action="store_true", help="Enables more detailed messages")
 
     subparsers = parser.add_subparsers(title="Commands")

@@ -1,4 +1,5 @@
 import json
+import time
 from collections import defaultdict
 
 from garminworkouts.models.running_workout import RunningWorkout
@@ -63,22 +64,37 @@ class PlanApplier:
             raise ValueError(f"Garmin Connect contains duplicate workout names: {', '.join(sorted(duplicates))}")
         return {name: items[0] for name, items in workouts.items()}
 
-    def _find_created_workout_id(self, workout_name):
-        matches = [
-            RunningWorkout.extract_workout_id(workout)
-            for workout in self.connection.list_workouts()
-            if RunningWorkout.is_running(workout) and RunningWorkout.extract_workout_name(workout) == workout_name
-        ]
-        if len(matches) != 1:
-            raise RuntimeError(
-                f"Workout '{workout_name}' was created but its Garmin ID could not be resolved unambiguously"
-            )
-        return matches[0]
+    def _find_created_workout_id(self, workout_name, attempts=5, delay_seconds=1):
+        for attempt in range(attempts):
+            matches = [
+                RunningWorkout.extract_workout_id(workout)
+                for workout in self.connection.list_workouts()
+                if RunningWorkout.is_running(workout) and RunningWorkout.extract_workout_name(workout) == workout_name
+            ]
+            if len(matches) == 1:
+                return matches[0]
+            if len(matches) > 1:
+                break
+            if attempt < attempts - 1:
+                time.sleep(delay_seconds)
+        raise RuntimeError(
+            f"Workout '{workout_name}' was created but its Garmin ID could not be resolved unambiguously"
+        )
 
     @staticmethod
     def _workout_id_from_response(response):
         if isinstance(response, dict):
-            return response.get("workoutId")
+            if response.get("workoutId") is not None:
+                return response["workoutId"]
+            for value in response.values():
+                workout_id = PlanApplier._workout_id_from_response(value)
+                if workout_id is not None:
+                    return workout_id
+        if isinstance(response, list):
+            for value in response:
+                workout_id = PlanApplier._workout_id_from_response(value)
+                if workout_id is not None:
+                    return workout_id
         return None
 
     def _scheduled_workout_keys(self):

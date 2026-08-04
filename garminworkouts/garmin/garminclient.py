@@ -1,99 +1,51 @@
-import json
-import sys
-
-from garminworkouts.garmin.session import connect, disconnect
-
-
 class GarminClient:
-    _WORKOUT_SERVICE_ENDPOINT = "/proxy/workout-service"
-
-    _REQUIRED_HEADERS = {"Referer": "https://connect.garmin.com/modern/workouts", "nk": "NT"}
-
-    def __init__(self, connect_url, sso_url, username, password, cookie_jar):
-        self.connect_url = connect_url
-        self.sso_url = sso_url
+    def __init__(self, username, password, token_store):
         self.username = username
         self.password = password
-        self.cookie_jar = cookie_jar
+        self.token_store = token_store
 
     def __enter__(self):
-        self.session = connect(self.connect_url, self.sso_url, self.username, self.password, self.cookie_jar)
+        from garminconnect import Garmin
+
+        self.session = Garmin(self.username, self.password)
+        self.session.login(tokenstore=self.token_store)
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        disconnect(self.session)
+        self.session = None
 
     def list_workouts(self, batch_size=100):
-        for start_index in range(0, sys.maxsize, batch_size):
-            url = f"{self.connect_url}{GarminClient._WORKOUT_SERVICE_ENDPOINT}/workouts"
-            params = {"start": start_index, "limit": batch_size}
-            response = self.session.get(url, headers=GarminClient._REQUIRED_HEADERS, params=params)
-            response.raise_for_status()
-
-            response_jsons = json.loads(response.text)
-            if not response_jsons or response_jsons == []:
+        start_index = 0
+        while True:
+            workouts = self.session.get_workouts(start=start_index, limit=batch_size)
+            if not workouts:
                 break
-
-            yield from response_jsons
+            yield from workouts
+            if len(workouts) < batch_size:
+                break
+            start_index += batch_size
 
     def get_workout(self, workout_id):
-        url = f"{self.connect_url}{GarminClient._WORKOUT_SERVICE_ENDPOINT}/workout/{workout_id}"
-
-        response = self.session.get(url, headers=GarminClient._REQUIRED_HEADERS)
-        response.raise_for_status()
-
-        return json.loads(response.text)
+        return self.session.get_workout_by_id(workout_id)
 
     def download_workout(self, workout_id, file):
-        url = f"{self.connect_url}{GarminClient._WORKOUT_SERVICE_ENDPOINT}/workout/FIT/{workout_id}"
-
-        response = self.session.get(url)
-        response.raise_for_status()
-
-        with open(file, "wb") as f:
-            f.write(response.content)
+        content = self.session.download_workout(workout_id)
+        with open(file, "wb") as output:
+            output.write(content)
 
     def save_workout(self, workout):
-        url = f"{self.connect_url}{GarminClient._WORKOUT_SERVICE_ENDPOINT}/workout"
-
-        response = self.session.post(url, headers=GarminClient._REQUIRED_HEADERS, json=workout)
-        response.raise_for_status()
-        return self._optional_json(response)
+        return self.session.upload_workout(workout)
 
     def update_workout(self, workout_id, workout):
-        url = f"{self.connect_url}{GarminClient._WORKOUT_SERVICE_ENDPOINT}/workout/{workout_id}"
-
-        response = self.session.put(url, headers=GarminClient._REQUIRED_HEADERS, json=workout)
-        response.raise_for_status()
-        return self._optional_json(response)
+        return self.session.update_workout(workout_id, workout)
 
     def delete_workout(self, workout_id):
-        url = f"{self.connect_url}{GarminClient._WORKOUT_SERVICE_ENDPOINT}/workout/{workout_id}"
-
-        response = self.session.delete(url, headers=GarminClient._REQUIRED_HEADERS)
-        response.raise_for_status()
+        return self.session.delete_workout(workout_id)
 
     def schedule_workout(self, workout_id, date):
-        url = f"{self.connect_url}{GarminClient._WORKOUT_SERVICE_ENDPOINT}/schedule/{workout_id}"
-        json_data = {"date": date}
-
-        response = self.session.post(url, headers=GarminClient._REQUIRED_HEADERS, json=json_data)
-        response.raise_for_status()
-        return self._optional_json(response)
+        return self.session.schedule_workout(workout_id, date)
 
     def list_scheduled_workouts(self, year, month):
         if not 1 <= int(month) <= 12:
             raise ValueError(f"Month must be between 1 and 12 but was {month}")
-        url = (
-            f"{self.connect_url}{GarminClient._WORKOUT_SERVICE_ENDPOINT}"
-            f"/schedule/year/{int(year)}/month/{int(month) - 1}"
-        )
-        response = self.session.get(url, headers=GarminClient._REQUIRED_HEADERS)
-        response.raise_for_status()
-        return self._optional_json(response) or []
-
-    @staticmethod
-    def _optional_json(response):
-        if not response.content:
-            return None
-        return response.json()
+        return self.session.get_scheduled_workouts(year, month) or []
