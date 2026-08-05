@@ -1,7 +1,7 @@
 [project]
 name = "garmin-running-workouts-import"
-version = "0.3.0"
-description = "Create, schedule, and manage running workouts in Garmin Connect"
+version = "0.4.0"
+description = "Assess activities and create, schedule, and manage running workouts in Garmin Connect"
 readme = "README.md"
 requires-python = ">=3.12,<3.15"
 dependencies = [
