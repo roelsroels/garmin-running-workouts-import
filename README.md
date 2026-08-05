@@ -15,6 +15,9 @@ Create structured running workouts from readable YAML, upload them to Garmin Con
 - Preview-first operation: no Garmin login or changes until `--apply` is supplied.
 - Create-or-update by workout name and duplicate-safe calendar scheduling.
 - Validation for ISO dates and watch-visible name collisions in the first 15 characters.
+- Chronological listing of completed Garmin activities with distance, duration, pace, and heart rate.
+- Adaptive selection and automatic download of private original FIT assessment bundles.
+- Versioned JSON manifests designed for chat-assisted analysis and future desktop/mobile clients.
 
 ## Installation
 
@@ -162,21 +165,72 @@ Other upstream commands remain available:
 ./garmin-workouts export ./exported-workouts
 ```
 
+## Download completed running activities
+
+The older `export` command above exports saved workout definitions. Completed activities recorded by the watch use the separate `activities` commands.
+
+List the latest completed runs, newest first:
+
+```shell
+./garmin-workouts activities list --last 20
+```
+
+Or list a date range:
+
+```shell
+./garmin-workouts activities list --from 2026-07-01 --to 2026-08-05
+```
+
+Ask the selector how many recent FIT activities are useful for the next assessment without downloading anything:
+
+```shell
+./garmin-workouts activities recommend
+```
+
+Automatic selection queries 42 days of running history and normally selects all runs in the latest 28-day window. It backfills older runs until at least six are available and caps unusually dense samples at 16. The JSON response explains the choice and prints the exact suggested download command.
+
+Prepare the recommended assessment bundle:
+
+```shell
+./garmin-workouts activities prepare
+```
+
+To request an exact number instead:
+
+```shell
+./garmin-workouts activities prepare --last 12
+```
+
+Garmin's original activity download is normally a ZIP. The tool safely extracts FIT payloads, validates their headers, names them by date and immutable Garmin activity ID, calculates SHA-256 checksums, and writes `manifest.json`. Repeating the command reuses identical files rather than creating duplicates.
+
+The default output is `personal_activities/assessment-DATE/`. This directory is ignored by Git, and the directory, FIT files, and manifest are created with private local permissions. Use `--output` to choose a different private location.
+
+Example chat-assisted workflow after a training block:
+
+```text
+Fetch the recommended recent Garmin FIT assessment set, assess my progress,
+and prepare the next four-week running plan for review.
+```
+
+The manifest is the stable handoff between Garmin acquisition, FIT analysis, plan generation, and delivery. That separation allows the same code to support this CLI now and a macOS/iOS interface later.
+
 ## Four-week FIT-driven workflow
 
 The importer deliberately separates training decisions from delivery:
 
-1. Export and review the latest FIT activities.
-2. Generate a dated four-week YAML block from progress, recovery, and current goals.
-3. Preview and validate the block locally.
-4. Explicitly apply it to Garmin Connect.
-5. Reassess before the next block rather than automatically advancing after one activity.
+1. Run `activities recommend` or let the assessment workflow choose the recent sample.
+2. Run `activities prepare` to download the selected original FIT files and manifest.
+3. Review FIT metrics alongside recovery, symptoms, blood pressure, and current goals.
+4. Generate a dated four-week YAML block.
+5. Preview and validate the block locally.
+6. Explicitly apply it to Garmin Connect.
+7. Reassess before the next block rather than automatically advancing after one activity.
 
 The example plan demonstrates this workflow, but it is not medical clearance. The athlete remains responsible for symptom, blood-pressure, recovery, and clinician-defined stop rules before starting a scheduled workout.
 
 ## Security and limitations
 
-- `.env`, `.venv`, and the Garmin token store are ignored by Git.
+- `.env`, `.venv`, the Garmin token store, personal plans, and downloaded activity bundles are ignored by Git.
 - Use a unique Garmin password and protect `.env` with local file permissions.
 - Do not run an unattended cloud job containing Garmin credentials.
 - Garmin's private endpoints, MFA, CAPTCHA, or SSO changes can break authentication.

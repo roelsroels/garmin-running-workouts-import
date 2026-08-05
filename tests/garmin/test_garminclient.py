@@ -67,3 +67,24 @@ def test_list_scheduled_workouts_rejects_invalid_month():
     client = _client_with_session()
     with pytest.raises(ValueError, match="Month must be between"):
         client.list_scheduled_workouts(2026, 13)
+
+
+def test_activity_operations_delegate_to_current_api():
+    client = _client_with_session()
+    client.session.ActivityDownloadFormat.ORIGINAL = "original"
+    client.session.get_activities.return_value = [{"activityId": 1}]
+    client.session.get_activities_by_date.return_value = [{"activityId": 2}]
+    client.session.download_activity.return_value = b"original"
+
+    assert client.list_recent_activities(12) == [{"activityId": 1}]
+    assert client.list_activities_by_date("2026-07-01", "2026-08-01") == [{"activityId": 2}]
+    assert client.download_activity_original(2) == b"original"
+
+    client.session.get_activities.assert_called_once_with(start=0, limit=12, activitytype="running")
+    client.session.get_activities_by_date.assert_called_once_with(
+        "2026-07-01",
+        "2026-08-01",
+        activitytype="running",
+        sortorder="desc",
+    )
+    client.session.download_activity.assert_called_once_with(2, dl_fmt="original")

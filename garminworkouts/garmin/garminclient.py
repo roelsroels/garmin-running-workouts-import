@@ -49,3 +49,18 @@ class GarminClient:
         if not 1 <= int(month) <= 12:
             raise ValueError(f"Month must be between 1 and 12 but was {month}")
         return self.session.get_scheduled_workouts(year, month) or []
+
+    def list_recent_activities(self, limit=20, activity_type="running"):
+        return self.session.get_activities(start=0, limit=limit, activitytype=activity_type) or []
+
+    def list_activities_by_date(self, start_date, end_date, activity_type="running"):
+        return self.session.get_activities_by_date(
+            start_date,
+            end_date,
+            activitytype=activity_type,
+            sortorder="desc",
+        )
+
+    def download_activity_original(self, activity_id):
+        download_format = self.session.ActivityDownloadFormat.ORIGINAL
+        return self.session.download_activity(activity_id, dl_fmt=download_format)

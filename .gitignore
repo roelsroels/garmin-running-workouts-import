@@ -26,5 +26,8 @@ venv/
 # Personalized dated plans stay local
 personal_plans/
 
+# Downloaded activities and FIT assessment bundles stay local
+personal_activities/
+
 # VS Code
 .vscode/
