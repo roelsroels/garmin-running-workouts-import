@@ -45,6 +45,9 @@ class GarminClient:
     def schedule_workout(self, workout_id, date):
         return self.session.schedule_workout(workout_id, date)
 
+    def unschedule_workout(self, scheduled_workout_id):
+        return self.session.unschedule_workout(scheduled_workout_id)
+
     def list_scheduled_workouts(self, year, month):
         if not 1 <= int(month) <= 12:
             raise ValueError(f"Month must be between 1 and 12 but was {month}")
