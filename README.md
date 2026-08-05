@@ -228,6 +228,81 @@ The importer deliberately separates training decisions from delivery:
 
 The example plan demonstrates this workflow, but it is not medical clearance. The athlete remains responsible for symptom, blood-pressure, recovery, and clinician-defined stop rules before starting a scheduled workout.
 
+## Changing the training goal
+
+The CLI does not silently infer or persist a training goal from Garmin data. A goal change is an explicit input to assessment and plan generation. This keeps a pace target, distance target, event date, or return-to-running objective from being changed merely because one activity was unusually good or bad.
+
+### 1. Describe the new goal precisely
+
+Provide enough information to make success measurable:
+
+```text
+Current goal:
+New primary goal:
+Success measure:
+Target date or time horizon:
+Desired start date for the replacement plan:
+Available running days:
+Required long-run day:
+Current longest comfortable run:
+Recent quality session that was completed well:
+Secondary goals:
+Constraints and non-goals:
+Symptoms, recovery, blood-pressure, or clinician guidance that affects training:
+```
+
+Examples of measurable primary goals include running continuously for 15 km, completing 20 minutes at 5:20/km under defined effort limits, or preparing for a specific 10 km event. Choose one primary goal per block; other ambitions should be secondary constraints rather than competing progression targets.
+
+### 2. Refresh the evidence
+
+Ask for a recommendation and prepare the selected FIT set:
+
+```shell
+./garmin-workouts activities recommend
+./garmin-workouts activities prepare
+```
+
+FIT files can show what happened, but not subjective RPE, symptoms, sleep quality, unusual heat, pre-run blood pressure, or the reason a session was shortened. Supply that context separately before generating the replacement plan.
+
+### 3. Generate a replacement proposal
+
+Use a request such as:
+
+```text
+Change my primary goal to [measurable goal] by [date]. Fetch or use the
+recommended recent FIT assessment set, assess the gap to that goal, and create
+a new four-week plan starting [date]. Preserve these constraints: [constraints].
+Show the assessment and plan before making any Garmin changes.
+```
+
+For a small, compatible change, finishing the current block and applying the new goal to the next block is usually the simplest transition. For an incompatible or time-sensitive goal, create a replacement plan for the remaining future dates.
+
+### 4. Review the plan offline
+
+Save the proposal as a new dated file rather than overwriting the previous plan, then preview it:
+
+```shell
+./garmin-workouts plan personal_plans/NEW-DATED-PLAN.yaml
+```
+
+Check the start date, run days, long-run placement, recovery spacing, progression logic, intensity targets, and watch-visible names. A goal change does not remove existing safety constraints unless they are explicitly reconsidered with appropriate clinical guidance.
+
+### 5. Replace future Garmin entries
+
+The importer creates or updates and schedules the new plan, but it does not automatically unschedule a superseded plan. Leave completed activities untouched. Before applying the replacement, manually remove only the future calendar entries and dated workout definitions belonging to the old plan when they would overlap or cause confusion.
+
+Then apply the reviewed replacement:
+
+```shell
+./garmin-workouts plan personal_plans/NEW-DATED-PLAN.yaml --apply
+```
+
+Sync the watch and verify the first scheduled workout and all weekend/weekday placement in Garmin Connect.
+
+### 6. Reassess rather than automatically escalating
+
+At the end of the block—or earlier if sessions are repeatedly incomplete, unexpectedly easy, or affected by symptoms—prepare a fresh FIT assessment bundle. Compare actual adherence and response with the new goal before progressing distance or speed again.
+
 ## Security and limitations
 
 - `.env`, `.venv`, the Garmin token store, personal plans, and downloaded activity bundles are ignored by Git.
