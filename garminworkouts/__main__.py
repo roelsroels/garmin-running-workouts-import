@@ -21,6 +21,7 @@ from garminworkouts.garmin.garminclient import GarminClient
 from garminworkouts.models.running_workout import RunningWorkout
 from garminworkouts.models.training_plan import TrainingPlan
 from garminworkouts.plan import PlanApplier, preview_plan
+from garminworkouts.retire import PlanRetirement
 from garminworkouts.utils.envdefault import EnvDefault
 from garminworkouts.utils.validators import writeable_dir
 
@@ -67,6 +68,31 @@ def command_plan(args):
     with _garmin_client(args) as connection:
         actions = PlanApplier(plan, connection).apply(schedule=not args.upload_only)
     print(json.dumps({"plan": plan.name, "actions": actions}, indent=2))
+
+
+def command_plan_retire(args):
+    plan = TrainingPlan(configreader.read_config(args.plan))
+    protected_plans = [TrainingPlan(configreader.read_config(path)) for path in args.protect_plan]
+
+    with _garmin_client(args) as connection:
+        retirement = PlanRetirement(plan, connection, protected_plans=protected_plans)
+        report = retirement.preview()
+        if not args.apply:
+            print(json.dumps(report, indent=2))
+            return
+        actions = retirement.apply(report)
+
+    print(
+        json.dumps(
+            {
+                "plan": plan.name,
+                "mode": "applied",
+                "actions": actions,
+                "completed_activities_deleted": 0,
+            },
+            indent=2,
+        )
+    )
 
 
 def command_export(args):
@@ -299,6 +325,23 @@ def main():
         "--upload-only", action="store_true", help="Create/update workouts but do not place them on the calendar"
     )
     parser_plan.set_defaults(func=command_plan)
+
+    parser_plan_retire = subparsers.add_parser(
+        "plan-retire",
+        description=(
+            "Preview or retire a dated plan by unscheduling its future calendar entries and deleting its workout "
+            "templates. Preview is the safe default."
+        ),
+    )
+    parser_plan_retire.add_argument("plan", help="Old dated plan YAML to retire")
+    parser_plan_retire.add_argument(
+        "--protect-plan",
+        action="append",
+        default=[],
+        help="New/active plan YAML whose reused workout names and calendar entries must be retained; repeatable",
+    )
+    parser_plan_retire.add_argument("--apply", action="store_true", help="Perform the previewed Garmin deletions")
+    parser_plan_retire.set_defaults(func=command_plan_retire)
 
     parser_export = subparsers.add_parser(
         "export", description="Export all workouts from Garmin Connect and save into directory"

@@ -8,6 +8,7 @@ The project keeps Garmin access, FIT assessment, training decisions, and user in
 2. **Assessment selection** adapts to training frequency, recommends a recent sample, and supports an explicit last-N override.
 3. **Private archive** extracts and validates FIT files, deduplicates them, and produces a versioned manifest with checksums.
 4. **Workout delivery** previews, creates or updates, and schedules dated running workouts.
+5. **Plan retirement** previews exact Garmin targets, protects definitions reused by active plans, unschedules future entries, and removes old workout templates without touching recorded activities.
 
 The manifest is the boundary between acquisition and analysis. A future UI should consume the manifest rather than call CLI parsing code.
 

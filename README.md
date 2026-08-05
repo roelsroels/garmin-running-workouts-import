@@ -14,6 +14,7 @@ Create structured running workouts from readable YAML, upload them to Garmin Con
 - Dated multi-week plans in one YAML file.
 - Preview-first operation: no Garmin login or changes until `--apply` is supplied.
 - Create-or-update by workout name and duplicate-safe calendar scheduling.
+- Preview-first retirement of old plans, including future-calendar cleanup and protected-plan handling.
 - Validation for ISO dates and watch-visible name collisions in the first 15 characters.
 - Chronological listing of completed Garmin activities with distance, duration, pace, and heart rate.
 - Adaptive selection and automatic download of private original FIT assessment bundles.
@@ -289,15 +290,39 @@ Check the start date, run days, long-run placement, recovery spacing, progressio
 
 ### 5. Replace future Garmin entries
 
-The importer creates or updates and schedules the new plan, but it does not automatically unschedule a superseded plan. Leave completed activities untouched. Before applying the replacement, manually remove only the future calendar entries and dated workout definitions belonging to the old plan when they would overlap or cause confusion.
-
-Then apply the reviewed replacement:
+Apply the reviewed replacement first:
 
 ```shell
 ./garmin-workouts plan personal_plans/NEW-DATED-PLAN.yaml --apply
 ```
 
-Sync the watch and verify the first scheduled workout and all weekend/weekday placement in Garmin Connect.
+Verify the new Garmin calendar before retiring the old plan. Leave completed activities untouched. Preview retirement while protecting any names or exact calendar entries reused by the new plan:
+
+```shell
+./garmin-workouts plan-retire personal_plans/OLD-DATED-PLAN.yaml \
+  --protect-plan personal_plans/NEW-DATED-PLAN.yaml
+```
+
+The preview logs the exact future schedule IDs to unschedule, past calendar entries to retain, old workout definitions to delete, protected definitions to keep, and anything missing or unresolved. It makes no Garmin changes.
+
+After reviewing the preview, retire the old plan explicitly:
+
+```shell
+./garmin-workouts plan-retire personal_plans/OLD-DATED-PLAN.yaml \
+  --protect-plan personal_plans/NEW-DATED-PLAN.yaml \
+  --apply
+```
+
+Retirement unschedules matching future calendar entries before deleting old workout templates. An unresolved future schedule ID blocks the operation. Recorded activities and downloaded FIT files are outside this workflow and are never deleted. `--protect-plan` is repeatable when multiple active plans must be retained.
+
+For a mid-block replacement, apply and verify the new plan first, then retire the old plan using the commands above. Sync the watch again and verify the first scheduled workout and all weekend/weekday placement in Garmin Connect.
+
+When a block has ended and no replacement reuses its workout names, omit `--protect-plan`:
+
+```shell
+./garmin-workouts plan-retire personal_plans/FINISHED-PLAN.yaml
+./garmin-workouts plan-retire personal_plans/FINISHED-PLAN.yaml --apply
+```
 
 ### 6. Reassess rather than automatically escalating
 
@@ -309,7 +334,7 @@ At the end of the block—or earlier if sessions are repeatedly incomplete, unex
 - Use a unique Garmin password and protect `.env` with local file permissions.
 - Do not run an unattended cloud job containing Garmin credentials.
 - Garmin's private endpoints, MFA, CAPTCHA, or SSO changes can break authentication.
-- Reapplying a plan is designed to be repeatable, but deleting or moving old calendar entries remains a manual Garmin Connect action.
+- Applying and retiring plans are designed to be repeatable, but Garmin's private endpoint behavior can change; always review previews and verify the calendar after synchronization.
 
 ## Development
 

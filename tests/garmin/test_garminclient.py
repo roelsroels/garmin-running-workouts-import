@@ -44,6 +44,7 @@ def test_workout_operations_delegate_to_current_api():
     client.update_workout(7, payload)
     client.delete_workout(7)
     client.schedule_workout(7, "2026-08-11")
+    client.unschedule_workout(17)
     client.list_scheduled_workouts(2026, 8)
 
     client.session.get_workout_by_id.assert_called_once_with(7)
@@ -51,6 +52,7 @@ def test_workout_operations_delegate_to_current_api():
     client.session.update_workout.assert_called_once_with(7, payload)
     client.session.delete_workout.assert_called_once_with(7)
     client.session.schedule_workout.assert_called_once_with(7, "2026-08-11")
+    client.session.unschedule_workout.assert_called_once_with(17)
     client.session.get_scheduled_workouts.assert_called_once_with(2026, 8)
 
 
