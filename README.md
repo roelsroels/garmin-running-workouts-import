@@ -229,6 +229,100 @@ The importer deliberately separates training decisions from delivery:
 
 The example plan demonstrates this workflow, but it is not medical clearance. The athlete remains responsible for symptom, blood-pressure, recovery, and clinician-defined stop rules before starting a scheduled workout.
 
+## How a four-week schedule is designed
+
+### What is automated today
+
+The software automates Garmin access, recent-activity selection, original FIT download, manifest creation, YAML validation, workout upload, calendar scheduling, and old-plan retirement. It does **not** currently contain a clinically validated algorithm that autonomously prescribes training.
+
+Training decisions are presently made during an explicit assessment step using the FIT evidence, the athlete's report, the goal, schedule preferences, and safety constraints. The result is a reviewable YAML proposal. Garmin receives that fixed proposal only after `--apply`; Garmin and the watch do not rewrite subsequent sessions in response to one completed run.
+
+### Planning inputs
+
+A useful plan combines four input groups:
+
+1. **Goal and time horizon:** target distance, duration, pace, event date, and the one primary outcome for the block.
+2. **Constraints:** available days, required weekend long run, maximum current distance, injury considerations, clinician guidance, medication effects, and explicit stop rules.
+3. **Objective running evidence:** recent distance and duration, moving versus elapsed time, pace, heart rate, interval/lap execution, heart-rate recovery, cadence, and other FIT dynamics when recorded reliably.
+4. **Context FIT cannot supply:** RPE, symptoms, pre-run blood pressure, sleep, heat, illness, pain, motivation, and why a workout was changed or stopped.
+
+Running dynamics are supporting evidence, not automatic reasons to change a plan. A small cadence, ground-contact-time, or balance change can reflect pace, terrain, sensor quality, or fatigue rather than a problem.
+
+### Construction logic
+
+Four weeks is used as a practical review block: long enough to repeat key sessions and observe direction, but short enough to avoid committing many weeks to an unsuitable progression. It is not a physiologically magic period.
+
+A typical three-run week contains:
+
+- one easy aerobic run, controlled primarily by RPE and the talk test;
+- one easy long run, normally held stable while quality progresses;
+- one controlled quality session aimed at the primary performance goal;
+- recovery days between runs and a reduced-load final cycle.
+
+The plan aims for a clear majority of total running time at low intensity. “80/20” is treated as an approximate intensity-distribution concept, not a requirement that exactly 20% of sessions be hard. With three weekly runs, one quality session is one third of the session count, while its actual hard minutes can still be a much smaller share of total training time. Research supports predominantly low-intensity endurance training and shows that polarized distributions can be effective, including in recreational runners, but the literature does not establish one universal distribution for every athlete.
+
+Progression is gated rather than automatic:
+
+- repeat a new quality format before extending it;
+- progress repetition duration or total quality time only after complete, even execution at the intended effort;
+- hold or reduce the long run while speed endurance changes;
+- avoid deliberately increasing both speed demand and total volume in the same cycle;
+- reduce load in the final cycle to consolidate and expose accumulated fatigue;
+- prefer repeating a successful session over advancing from one unusually strong result.
+
+These are conservative coaching heuristics, not proven universal laws. Exact recovery spacing, progression increments, and deload timing must be adjusted to the athlete's history and response.
+
+### How previous results change the next plan
+
+Before a new block, `activities recommend` normally evaluates the latest 28 days and selects 6–16 recent runs from up to 42 days of history. `activities prepare` downloads the corresponding FIT files. The assessment then compares planned intent with actual execution:
+
+- sessions completed, shortened, substituted, or skipped;
+- weekly frequency, duration, distance, and long-run continuity;
+- pace and heart rate for comparable easy running;
+- pace stability and cardiac drift within longer steady runs;
+- interval completion, rep-to-rep consistency, and recovery between efforts;
+- stopped time and whether interruptions were training-related or environmental;
+- RPE, symptoms, blood pressure, heat, sleep, illness, and recovery reported by the athlete;
+- data-quality limitations, such as missing chest-strap data or unreliable GPS.
+
+Typical decisions are:
+
+| Observed response | Likely next-block decision |
+|---|---|
+| Key sessions complete, even, controlled, and symptom-free | Progress one dimension modestly |
+| Goal pace achieved only in short reps | Accumulate more controlled time before making reps longer |
+| Pace target met but RPE or recovery is excessive | Repeat or reduce; do not progress from pace alone |
+| Long run is comfortable but quality is incomplete | Hold long-run distance and repeat quality work |
+| Quality is controlled but long-run continuity is poor | Hold speed and address aerobic duration/continuity |
+| Repeated fatigue, abnormal response, pain, symptoms, or failed recovery | Reduce load and seek appropriate clinical input where indicated |
+| One exceptional or poor run without a repeated pattern | Treat as low-confidence evidence rather than immediately redesigning the block |
+
+Within an active block, adaptation is currently **supervised and explicit**. Conditional instructions can say “progress only if the prior sessions were complete and even,” but the watch cannot inspect the FIT file and choose the branch itself. To alter future sessions, prepare the latest data, review it, generate a revised YAML file, upload the replacement, and retire the superseded plan using the preview-first workflow.
+
+### Scientific status and limitations
+
+The schedules are best described as **evidence-informed and individualized, but not clinically validated prescriptions**.
+
+The evidence-informed elements include predominantly easy training, one bounded quality stimulus, gradual progression, repeated exposure before progression, recovery, RPE/talk-test monitoring, and periodic reassessment. The individualized elements come from actual FIT history, goal, adherence, reported effort, preferences, and explicit safety constraints.
+
+Important limitations remain:
+
+- Most endurance-training studies involve healthy participants or trained athletes, often in small samples; their results do not automatically generalize to an individual with cardiovascular disease.
+- “80/20” depends on whether intensity is counted by sessions, time, pace, or heart-rate zones and should not be treated as a precise biological threshold.
+- FIT heart rate, pace, and running dynamics can describe exercise response but cannot diagnose ischaemia, arrhythmia, valve function, or medical safety.
+- Practical heart-rate caps in a YAML plan are watch alerts, not clinically established zones unless derived from appropriate clinical exercise testing.
+- Without a cardiopulmonary exercise test, ventilatory/lactate thresholds and an individualized clinical exercise prescription remain estimates.
+- A good recent trend reduces uncertainty but cannot guarantee that the next progression is safe or effective.
+
+For athletes with cardiovascular disease, the plan must remain subordinate to individualized risk assessment, clinician guidance, symptoms, and—where appropriate—exercise testing. The ESC sports-cardiology guideline specifically emphasizes assessment and risk stratification for exercise in valvular heart disease and also notes limitations in the available evidence.
+
+### Main scientific references
+
+- [2020 ESC Guidelines on sports cardiology and exercise in patients with cardiovascular disease](https://www.escardio.org/guidelines/clinical-practice-guidelines/all-esc-practice-guidelines/sports-cardiology-and-exercise/)
+- [JCS/JACR guideline on cardiovascular rehabilitation](https://www.jstage.jst.go.jp/article/circj/87/1/87_CJ-22-0234/_html/-char/en), including exercise testing, RPE, heart-rate methods, and the talk test
+- [Randomized comparison of polarized and between-threshold training in recreational runners](https://pubmed.ncbi.nlm.nih.gov/23752040/)
+- [Systematic review of polarized training, VO2max, and work economy](https://pmc.ncbi.nlm.nih.gov/articles/PMC11679080/)
+
 ## Changing the training goal
 
 The CLI does not silently infer or persist a training goal from Garmin data. A goal change is an explicit input to assessment and plan generation. This keeps a pace target, distance target, event date, or return-to-running objective from being changed merely because one activity was unusually good or bad.
