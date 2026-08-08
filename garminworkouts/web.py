@@ -56,8 +56,14 @@ def create_app(config=None):
 
     @app.after_request
     def security_headers(response):
+        # The versioned Buy Me a Coffee footer widget injects one known style block
+        # and loads Bree Serif. Pin that block by hash instead of allowing all inline CSS.
         response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self'; "
+            "default-src 'self'; "
+            "style-src 'self' 'sha256-Ql5/wMk95FxT6SRSAAPkbhjdpkaD03IFdbKdmFYoeuc=' "
+            "https://fonts.googleapis.com; "
+            "script-src 'self' https://cdnjs.buymeacoffee.com; "
+            "font-src https://fonts.gstatic.com; img-src 'self'; "
             "form-action 'self'; frame-ancestors 'none'; base-uri 'self'"
         )
         response.headers["Referrer-Policy"] = "no-referrer"
