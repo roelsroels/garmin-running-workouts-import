@@ -29,6 +29,10 @@ def test_web_dashboard_goal_calendar_and_settings_render(tmp_path):
     dashboard = client.get("/")
     assert dashboard.status_code == 200
     assert b"Garmin training scheduler &amp; importer" in dashboard.data
+    assert b"Roel van der Made" in dashboard.data
+    assert b"https://github.com/roelsroels/garmin-running-workouts-import" in dashboard.data
+    assert b"https://cdnjs.buymeacoffee.com/1.0.0/button.prod.min.js" in dashboard.data
+    assert b'data-text="Buy me a beer"' in dashboard.data
 
     for path in ("/goal", "/calendar", "/cleanup", "/workouts/new", "/settings"):
         response = client.get(path)
@@ -135,7 +139,12 @@ def test_security_headers_are_present(tmp_path):
     response = _app(tmp_path).test_client().get("/")
 
     assert response.headers["X-Frame-Options"] == "DENY"
-    assert "frame-ancestors 'none'" in response.headers["Content-Security-Policy"]
+    policy = response.headers["Content-Security-Policy"]
+    assert "frame-ancestors 'none'" in policy
+    assert "script-src 'self' https://cdnjs.buymeacoffee.com" in policy
+    assert "https://fonts.googleapis.com" in policy
+    assert "font-src https://fonts.gstatic.com" in policy
+    assert "'unsafe-inline'" not in policy
     assert response.headers["Cache-Control"] == "no-store"
 
 
