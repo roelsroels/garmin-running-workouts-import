@@ -221,10 +221,13 @@ class ActivityArchive:
             "selection": selection.to_dict(),
             "activities": archived,
             "analysis_guidance": [
-                "Compare pace versus heart rate and perceived session purpose across the selected period.",
-                "Inspect interval completion, rep consistency, and heart-rate recovery where FIT records support it.",
-                "Inspect long-run continuity, cardiac drift, cadence, and running dynamics where available.",
-                "Use symptoms, recovery, blood pressure, heat, and clinician guidance as constraints outside FIT data.",
+                "Compare completed training with the runner's stated goal and intended session purpose.",
+                "Inspect duration, distance, pace, heart rate, interval execution, and recovery only where FIT "
+                "records support them.",
+                "Inspect long-run continuity, pace-to-heart-rate drift, cadence, elevation, and running dynamics "
+                "where available.",
+                "Combine FIT evidence with reported effort, sleep, terrain, weather, illness or injury, and optional "
+                "user-supplied constraints; do not infer missing context.",
             ],
         }
         manifest_path = self.destination / "manifest.json"

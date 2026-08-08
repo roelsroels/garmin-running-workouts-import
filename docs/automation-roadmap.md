@@ -1,6 +1,6 @@
 # Automation architecture and roadmap
 
-The project keeps Garmin access, FIT assessment, training decisions, and user interfaces as separate layers. This avoids coupling health-sensitive decision logic to Garmin's private API or to one command-line interface.
+The project keeps Garmin access, FIT assessment, training decisions, and user interfaces as separate layers. This avoids coupling evidence-based planning logic to Garmin's private API or to one command-line interface.
 
 ## Implemented foundation
 
@@ -18,18 +18,18 @@ A FIT analysis service can add derived, reproducible metrics to a second version
 
 - activity and moving time, distance, pace, heart-rate distribution, and elevation;
 - interval rep execution and recovery between efforts;
-- pace-to-heart-rate relationship and within-run cardiac drift;
+- pace-to-heart-rate relationship and within-run aerobic decoupling;
 - cadence, ground-contact time, vertical oscillation, and left/right balance when recorded;
 - long-run continuity, stopped time, and week-over-week load;
 - data-quality flags for missing sensors, GPS problems, or implausible values.
 
-The analysis result should record which FIT fields supported each conclusion. Subjective RPE, symptoms, recovery, blood pressure, weather, and clinician instructions require explicit user input and must not be inferred from FIT data.
+The analysis result should record which FIT fields supported each conclusion. Subjective RPE, sleep, terrain, weather, illness, injury, schedule changes, and optional health-professional instructions require explicit user input and must not be inferred from FIT data.
 
 ## Plan policy layer
 
 Plan generation should take structured assessment results plus explicit constraints and produce a previewable YAML proposal. It should remain conservative and explain every progression or regression. Applying the plan to Garmin must continue to require an explicit action.
 
-Useful policy inputs include available training days, weekend long-run preference, target event or pace, maximum distance, recent adherence, pain or symptoms, blood-pressure guardrails, and clinician-defined limits.
+Useful policy inputs include training age, available days, long-run preference, target event or performance, recent adherence, current tolerable distance, reported effort, injury status, and any user-defined limits. Health constraints are optional inputs supplied by the runner; the planner does not infer diagnoses or medical clearance from activity data.
 
 ## Application path
 

@@ -47,7 +47,7 @@ class PaceRange:
         elif isinstance(value, list | tuple):
             tokens = [str(token).strip() for token in value]
         else:
-            raise ValueError("Pace must be a range such as '5:25-5:30' or ['5:25', '5:30']")
+            raise ValueError("Pace must be a range such as '6:00-6:10' or ['6:00', '6:10']")
 
         if len(tokens) != 2:
             raise ValueError("Pace must contain exactly two bounds")
