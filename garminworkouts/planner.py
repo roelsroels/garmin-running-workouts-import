@@ -7,7 +7,7 @@ from pathlib import Path
 
 import yaml
 
-ENGINE_VERSION = 1
+ENGINE_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -95,6 +95,11 @@ class DeterministicPlanner:
                 "User-supplied constraints are preserved for review but are not automatically "
                 "interpreted by the engine."
             )
+        if goal.heart_rate_targets:
+            rationale.append(
+                "Heart-rate alerts are copied from user-supplied targets; the engine does not derive or "
+                "clinically validate BPM limits or Garmin zones."
+            )
 
         long_run_km = baseline.longest_run_km or goal.baseline_long_run_km
         if long_run_km is None:
@@ -122,7 +127,7 @@ class DeterministicPlanner:
             elif workout_date.weekday() == quality_day:
                 workout = self._quality_workout(goal, workout_date, week_index, baseline.confidence)
             else:
-                workout = self._easy_workout(workout_date, week_index, easy_minutes)
+                workout = self._easy_workout(workout_date, week_index, easy_minutes, goal=goal)
             workouts.append(workout)
 
         confidence = baseline.confidence
@@ -173,7 +178,7 @@ class DeterministicPlanner:
             elif workout_date.weekday() == quality_day:
                 workout = self._quality_workout(goal, workout_date, week_index, baseline.confidence)
             else:
-                workout = self._easy_workout(workout_date, week_index, easy_minutes)
+                workout = self._easy_workout(workout_date, week_index, easy_minutes, goal=goal)
             workouts.append(workout)
 
         confidence = baseline.confidence
@@ -258,19 +263,27 @@ class DeterministicPlanner:
         candidates = [day for day in selected_days if day != long_run_day]
         return candidates[0] if candidates else None
 
-    def _easy_workout(self, workout_date, week_index, easy_minutes):
+    def _easy_workout(self, workout_date, week_index, easy_minutes, goal=None):
         duration = easy_minutes if week_index < 3 else max(20, round(easy_minutes * 0.85))
-        name = f"{workout_date:%y%m%d} Easy{duration}"
+        steps = [
+            self._heart_rate_step(goal, "warmup", {"type": "warmup", "duration": "5:00"}),
+            self._heart_rate_step(
+                goal,
+                "easy",
+                {"type": "interval", "duration": _minutes(max(10, duration - 10))},
+            ),
+            self._heart_rate_step(goal, "warmup", {"type": "cooldown", "duration": "5:00"}),
+        ]
+        name = f"{workout_date:%y%m%d} Easy{duration}{_heart_rate_name_suffix(steps)}"
+        heart_rate_text = _heart_rate_description(self._heart_rate_target(goal, "easy"))
         return {
             "date": workout_date.isoformat(),
             "sport": "running",
             "name": name,
-            "description": f"{duration} min easy; RPE 2-3 and conversational; no pace target",
-            "steps": [
-                {"type": "warmup", "duration": "5:00"},
-                {"type": "interval", "duration": _minutes(max(10, duration - 10))},
-                {"type": "cooldown", "duration": "5:00"},
-            ],
+            "description": (
+                f"{duration} min easy; RPE 2-3 and conversational; no pace target{_description_suffix(heart_rate_text)}"
+            ),
+            "steps": steps,
         }
 
     def _long_workout(self, goal, workout_date, week_index, baseline_km):
@@ -284,17 +297,19 @@ class DeterministicPlanner:
             distance = baseline_km
         distance = max(3.0, round(distance * 2) / 2)
         code = round(distance * 10)
+        steps = [self._heart_rate_step(goal, "long", {"type": "interval", "distance": f"{distance:g}km"})]
+        heart_rate_text = _heart_rate_description(self._heart_rate_target(goal, "long"))
         return {
             "date": workout_date.isoformat(),
             "sport": "running",
-            "name": f"{workout_date:%y%m%d} Long{code:03d}",
-            "description": f"{distance:g} km easy; RPE 2-3 and conversational",
-            "steps": [{"type": "interval", "distance": f"{distance:g}km"}],
+            "name": f"{workout_date:%y%m%d} Long{code:03d}{_heart_rate_name_suffix(steps)}",
+            "description": (f"{distance:g} km easy; RPE 2-3 and conversational{_description_suffix(heart_rate_text)}"),
+            "steps": steps,
         }
 
     def _quality_workout(self, goal, workout_date, week_index, confidence):
         if confidence == "insufficient":
-            return self._easy_workout(workout_date, week_index, 30)
+            return self._easy_workout(workout_date, week_index, 30, goal=goal)
         if goal.goal_type == "sustain_pace":
             fractions = (0.60, 0.75, 0.90, 0.65)
             repetitions = 2 if goal.target_duration_minutes <= 10 else (4 if week_index == 0 else 3)
@@ -311,29 +326,53 @@ class DeterministicPlanner:
         target_pace = goal.target_pace
         work_step = {"type": "interval", "duration": _minutes(work_minutes)}
         target_text = "at controlled RPE 6-7"
-        if target_pace:
+        use_quality_heart_rate = goal.quality_target_preference == "heart_rate" and self._heart_rate_target(
+            goal, "quality"
+        )
+        if target_pace and not use_quality_heart_rate:
             pace_range = _pace_range(target_pace)
             work_step["pace"] = pace_range
             target_text = f"at {pace_range}/km, capped at RPE 7"
+        else:
+            work_step = self._heart_rate_step(goal, "quality", work_step)
+            heart_rate_text = _heart_rate_description(self._heart_rate_target(goal, "quality"))
+            if heart_rate_text:
+                target_text = f"using {heart_rate_text}, capped at RPE 7"
+        steps = [
+            self._heart_rate_step(goal, "warmup", {"type": "warmup", "duration": "15:00"}),
+            {
+                "repeat": repetitions,
+                "steps": [
+                    work_step,
+                    self._heart_rate_step(goal, "recovery", {"type": "recovery", "duration": "1:30"}),
+                ],
+            },
+            self._heart_rate_step(goal, "warmup", {"type": "cooldown", "duration": "10:00"}),
+        ]
         return {
             "date": workout_date.isoformat(),
             "sport": "running",
-            "name": f"{workout_date:%y%m%d} Q {repetitions}x{work_minutes}",
+            "name": (f"{workout_date:%y%m%d} Q {repetitions}x{work_minutes}{_heart_rate_name_suffix(steps)}"),
             "description": (
                 f"15 min easy; {repetitions} x {work_minutes} min {target_text} with 90 sec easy; 10 min easy"
             ),
-            "steps": [
-                {"type": "warmup", "duration": "15:00"},
-                {
-                    "repeat": repetitions,
-                    "steps": [
-                        work_step,
-                        {"type": "recovery", "duration": "1:30"},
-                    ],
-                },
-                {"type": "cooldown", "duration": "10:00"},
-            ],
+            "steps": steps,
         }
+
+    @staticmethod
+    def _heart_rate_target(goal, phase):
+        if goal is None or not goal.heart_rate_targets:
+            return None
+        target = goal.heart_rate_targets.get(phase)
+        if target is None and phase in {"warmup", "recovery", "long"}:
+            target = goal.heart_rate_targets.get("easy")
+        return target
+
+    def _heart_rate_step(self, goal, phase, step):
+        target = self._heart_rate_target(goal, phase)
+        if target and "pace" not in step:
+            return {**step, **target}
+        return step
 
 
 def _minutes(minutes):
@@ -347,6 +386,33 @@ def _pace(seconds):
 
 def _pace_range(target_seconds):
     return f"{_pace(target_seconds - 5)}-{_pace(target_seconds + 5)}"
+
+
+def _heart_rate_description(target):
+    if not target:
+        return ""
+    if "heart_rate_max" in target:
+        return f"HR ≤{target['heart_rate_max']} bpm"
+    if "heart_rate" in target:
+        lower, upper = target["heart_rate"]
+        return f"HR {lower}-{upper} bpm"
+    return f"Garmin HR zone {target['heart_rate_zone']}"
+
+
+def _description_suffix(text):
+    return f"; {text}" if text else ""
+
+
+def _heart_rate_name_suffix(steps):
+    def contains_target(items):
+        for item in items:
+            if any(key in item for key in ("heart_rate_max", "heart_rate", "heart_rate_zone")):
+                return True
+            if contains_target(item.get("steps", [])):
+                return True
+        return False
+
+    return " HR" if contains_target(steps) else ""
 
 
 def write_plan(path, config):

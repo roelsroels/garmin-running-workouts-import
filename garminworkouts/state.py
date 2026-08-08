@@ -5,7 +5,11 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, date, datetime
 from pathlib import Path
 
+from garminworkouts.models.heart_rate import HeartRateRange, validate_heart_rate_zone
+
 SCHEMA_VERSION = 1
+
+HEART_RATE_PHASES = {"warmup", "easy", "long", "quality", "recovery"}
 
 
 def _now():
@@ -28,6 +32,8 @@ class Goal:
     runs_per_week: int = 3
     max_session_minutes: int = 90
     baseline_long_run_km: float | None = None
+    heart_rate_targets: dict = field(default_factory=dict)
+    quality_target_preference: str = "pace"
     constraints: str = ""
     id: int | None = field(default=None, compare=False)
 
@@ -72,7 +78,13 @@ class Goal:
             raise ValueError("Target duration must be positive")
         if self.target_date is not None and self.target_date < self.start_date:
             raise ValueError("Target date cannot be before the plan start date")
+        heart_rate_targets = _validated_heart_rate_targets(self.heart_rate_targets)
+        if self.quality_target_preference not in {"pace", "heart_rate"}:
+            raise ValueError("Quality target preference must be 'pace' or 'heart_rate'")
+        if self.quality_target_preference == "heart_rate" and "quality" not in heart_rate_targets:
+            raise ValueError("A heart-rate quality preference requires a quality heart-rate target")
         object.__setattr__(self, "available_days", days)
+        object.__setattr__(self, "heart_rate_targets", heart_rate_targets)
 
     def to_dict(self):
         result = asdict(self)
@@ -97,6 +109,32 @@ class Goal:
         if self.target_time_seconds and self.target_distance_km:
             return round(self.target_time_seconds / self.target_distance_km)
         return None
+
+
+def _validated_heart_rate_targets(value):
+    if value in (None, {}):
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError("Heart-rate targets must be a mapping by workout phase")
+    result = {}
+    for phase, target in value.items():
+        if phase not in HEART_RATE_PHASES:
+            raise ValueError(f"Unsupported heart-rate phase '{phase}'")
+        if not isinstance(target, dict):
+            raise ValueError(f"Heart-rate target for '{phase}' must be a mapping")
+        keys = [key for key in ("heart_rate_max", "heart_rate", "heart_rate_zone") if key in target]
+        if len(keys) != 1:
+            raise ValueError(f"Heart-rate target for '{phase}' must define exactly one target type")
+        key = keys[0]
+        if key == "heart_rate_max":
+            heart_rate = HeartRateRange.from_maximum(target[key])
+            result[phase] = {key: heart_rate.upper}
+        elif key == "heart_rate":
+            heart_rate = HeartRateRange.from_config(target[key])
+            result[phase] = {key: list(heart_rate.to_bpm_bounds())}
+        else:
+            result[phase] = {key: validate_heart_rate_zone(target[key])}
+    return result
 
 
 @dataclass(frozen=True)

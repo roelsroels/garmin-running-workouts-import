@@ -4,6 +4,112 @@ from datetime import date
 from garminworkouts.models.running_workout import RunningWorkout
 
 
+class ScheduledConflictCleanup:
+    """Find and retire Garmin schedules that overlap a replacement plan."""
+
+    def __init__(self, replacement_plan, connection, today=None):
+        self.replacement_plan = replacement_plan
+        self.connection = connection
+        self.today = today or date.today()
+
+    def preview(self):
+        entries = [entry for entry in self.replacement_plan.entries if entry["date"] >= self.today]
+        target_dates = {entry["date"].isoformat() for entry in entries}
+        protected_keys = {(entry["date"].isoformat(), entry["workout"].get_workout_name()) for entry in entries}
+        protected_names = {entry["workout"].get_workout_name() for entry in entries}
+        workouts_by_id = {}
+        for workout in self.connection.list_workouts():
+            if RunningWorkout.is_running(workout):
+                workouts_by_id[str(RunningWorkout.extract_workout_id(workout))] = workout
+
+        calendar = []
+        seen = set()
+        protected_calendar_keys_seen = set()
+        for item in self._scheduled_items(entries):
+            if item["date"] not in target_dates:
+                continue
+            key = (str(item["scheduled_workout_id"]), str(item["workout_id"]), item["date"])
+            if key in seen:
+                continue
+            seen.add(key)
+            workout = workouts_by_id.get(str(item["workout_id"]))
+            if workout is None:
+                continue
+            name = RunningWorkout.extract_workout_name(workout)
+            calendar_key = (item["date"], name)
+            if calendar_key in protected_keys and calendar_key not in protected_calendar_keys_seen:
+                protected_calendar_keys_seen.add(calendar_key)
+                continue
+            calendar.append(
+                {
+                    "date": item["date"],
+                    "name": name,
+                    "workout_id": item["workout_id"],
+                    "scheduled_workout_id": item["scheduled_workout_id"],
+                    "action": "unschedule" if item["scheduled_workout_id"] is not None else "unresolved-schedule-id",
+                    "template_can_be_deleted": name not in protected_names,
+                }
+            )
+
+        templates = {}
+        for item in calendar:
+            if item["template_can_be_deleted"]:
+                templates[str(item["workout_id"])] = {
+                    "workout_id": item["workout_id"],
+                    "name": item["name"],
+                }
+        calendar.sort(key=lambda item: (item["date"], item["name"]))
+        return {
+            "calendar": calendar,
+            "templates": sorted(templates.values(), key=lambda item: item["name"]),
+            "summary": {
+                "overlapping_calendar_entries": len(calendar),
+                "unresolved_calendar_entries": sum(item["action"] == "unresolved-schedule-id" for item in calendar),
+                "obsolete_template_candidates": len(templates),
+            },
+            "warnings": [
+                "Only scheduled workouts on replacement dates are included.",
+                "Completed activity/FIT records are never deleted.",
+            ],
+        }
+
+    def apply(self, preview, delete_templates=False):
+        unresolved = [item for item in preview["calendar"] if item["action"] == "unresolved-schedule-id"]
+        if unresolved:
+            raise RuntimeError("Cannot replace schedules while a Garmin schedule ID is unresolved")
+        actions = []
+        for item in preview["calendar"]:
+            self.connection.unschedule_workout(item["scheduled_workout_id"])
+            actions.append(
+                {
+                    "action": "unscheduled-conflict",
+                    "date": item["date"],
+                    "name": item["name"],
+                    "workout_id": item["workout_id"],
+                    "scheduled_workout_id": item["scheduled_workout_id"],
+                }
+            )
+        if delete_templates:
+            for item in preview["templates"]:
+                self.connection.delete_workout(item["workout_id"])
+                actions.append(
+                    {
+                        "action": "deleted-conflicting-workout-template",
+                        "name": item["name"],
+                        "workout_id": item["workout_id"],
+                    }
+                )
+        return actions
+
+    def _scheduled_items(self, entries):
+        months = {(entry["date"].year, entry["date"].month) for entry in entries}
+        items = []
+        for year, month in sorted(months):
+            response = self.connection.list_scheduled_workouts(year, month)
+            items.extend(PlanRetirement._extract_scheduled_items(response))
+        return items
+
+
 class PlanRetirement:
     def __init__(self, plan, connection, protected_plans=None, today=None):
         self.plan = plan

@@ -82,6 +82,59 @@ def test_sustain_pace_plan_progresses_toward_requested_duration():
     assert [item["name"].split()[-1] for item in quality] == ["4x3", "3x5", "3x6", "3x4"]
 
 
+def test_generated_plan_applies_interactive_heart_rate_targets_by_phase():
+    goal = Goal(
+        goal_type="endurance",
+        description="Endurance with HR guidance",
+        start_date=date(2030, 1, 8),
+        available_days=(1, 3, 6),
+        long_run_day=6,
+        runs_per_week=3,
+        heart_rate_targets={
+            "warmup": {"heart_rate_max": 125},
+            "easy": {"heart_rate_max": 140},
+            "long": {"heart_rate": [120, 145]},
+            "quality": {"heart_rate_zone": 4},
+            "recovery": {"heart_rate_max": 135},
+        },
+        quality_target_preference="heart_rate",
+        id=2,
+    )
+    proposal = DeterministicPlanner().generate(goal, _activities())
+    TrainingPlan(proposal.config)
+    easy = next(item for item in proposal.config["workouts"] if " Easy" in item["name"])
+    long_run = next(item for item in proposal.config["workouts"] if " Long" in item["name"])
+    quality = next(item for item in proposal.config["workouts"] if " Q " in item["name"])
+
+    assert easy["steps"][0]["heart_rate_max"] == 125
+    assert easy["steps"][1]["heart_rate_max"] == 140
+    assert long_run["steps"][0]["heart_rate"] == [120, 145]
+    assert quality["steps"][1]["steps"][0]["heart_rate_zone"] == 4
+    assert quality["steps"][1]["steps"][1]["heart_rate_max"] == 135
+    assert all(item["name"].endswith(" HR") for item in (easy, long_run, quality))
+
+
+def test_pace_can_remain_primary_while_other_phases_use_heart_rate():
+    values = _goal("sustain_pace").to_dict()
+    values.update(
+        {
+            "heart_rate_targets": {
+                "warmup": {"heart_rate_max": 125},
+                "quality": {"heart_rate_max": 165},
+            },
+            "quality_target_preference": "pace",
+        }
+    )
+    goal = Goal.from_dict(values)
+    proposal = DeterministicPlanner().generate(goal, _activities())
+    quality = next(item for item in proposal.config["workouts"] if " Q " in item["name"])
+    work_step = quality["steps"][1]["steps"][0]
+
+    assert "pace" in work_step
+    assert "heart_rate_max" not in work_step
+    assert quality["steps"][0]["heart_rate_max"] == 125
+
+
 def test_adaptation_contains_only_remaining_dates_and_fit_evidence(tmp_path):
     original = DeterministicPlanner().generate(_goal(), _activities())
     record = PlanRecord(
