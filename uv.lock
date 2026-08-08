@@ -281,7 +281,7 @@ wheels = [
 
 [[package]]
 name = "garmin-running-workouts-import"
-version = "0.6.0"
+version = "0.6.1"
 source = { virtual = "." }
 dependencies = [
     { name = "garmin-fit-sdk" },

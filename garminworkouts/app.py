@@ -6,6 +6,11 @@ from pathlib import Path
 from garminworkouts.activities import ActivityArchive, ActivitySummary, AssessmentSelector
 from garminworkouts.fit_analysis import FitAnalyzer
 from garminworkouts.garmin.garminclient import GarminClient
+from garminworkouts.garmin.ratelimit import (
+    GarminRateLimiter,
+    GarminRateLimitError,
+    has_reusable_tokens,
+)
 from garminworkouts.llm import LLMConfig, OpenAICompatibleAdvisor
 from garminworkouts.models.training_plan import TrainingPlan
 from garminworkouts.plan import PlanApplier
@@ -156,13 +161,17 @@ class InteractiveApp:
             status = row.get("status", "unknown")
             self.console.write(f"  {workout['date']}  {status:9}  {workout['name']}  {workout.get('description', '')}")
 
-    def refresh(self, silent=False):
+    def refresh(self, silent=False, connection=None):
         plan = self.state.active_plan()
         if not plan:
             if not silent:
                 self.console.write("No active plan to refresh.")
             return []
-        activities = self._fetch_activities(plan.start_date - timedelta(days=1), self.today + timedelta(days=1))
+        activities = self._fetch_activities(
+            plan.start_date - timedelta(days=1),
+            self.today + timedelta(days=1),
+            connection=connection,
+        )
         summary = self.state.refresh_progress(plan.id, activities, today=self.today)
         self.state.record_event("progress-refreshed", {"plan_id": plan.id, "activity_count": len(activities)})
         if not silent:
@@ -202,14 +211,17 @@ class InteractiveApp:
         active_plan = self.state.active_plan()
         if not goal or not active_plan:
             raise ValueError("An active goal and plan are required")
-        self.refresh(silent=True)
-        progress = self.state.block_progress_summary(active_plan.id)
-        if progress["completed"] < 2:
-            self.console.write("Fewer than two scheduled runs are complete; retaining the current plan is recommended.")
-            return None
+        with self._garmin_client() as connection:
+            self.refresh(silent=True, connection=connection)
+            progress = self.state.block_progress_summary(active_plan.id)
+            if progress["completed"] < 2:
+                self.console.write(
+                    "Fewer than two scheduled runs are complete; retaining the current plan is recommended."
+                )
+                return None
 
-        activities = self._fetch_recent_history()
-        fit_analysis = self._prepare_fit_analysis(activities)
+            activities = self._fetch_recent_history(connection=connection)
+            fit_analysis = self._prepare_fit_analysis(activities, connection=connection)
         proposal = self.planner.adapt_remaining(
             goal,
             active_plan,
@@ -272,8 +284,15 @@ class InteractiveApp:
         self.state.set_setting("garmin_token_store", str(self.state.tokens_dir))
         if not test_connection:
             return
+        rate_limiter = GarminRateLimiter(self.state.tokens_dir)
+        rate_limiter.check_cooldown()
         password = self.console.secret("Garmin password (not stored)")
-        with GarminClient(username, password, str(self.state.tokens_dir)) as connection:
+        with GarminClient(
+            username,
+            password,
+            str(self.state.tokens_dir),
+            rate_limiter=rate_limiter,
+        ) as connection:
             connection.list_recent_activities(1)
         self.console.write("Garmin connection succeeded; reusable session tokens were stored privately.")
 
@@ -373,13 +392,22 @@ class InteractiveApp:
             constraints=constraints,
         )
 
-    def _fetch_recent_history(self):
-        return self._fetch_activities(self.today - timedelta(days=42), self.today)
+    def _fetch_recent_history(self, connection=None):
+        return self._fetch_activities(
+            self.today - timedelta(days=42),
+            self.today,
+            connection=connection,
+        )
 
-    def _prepare_fit_analysis(self, activities):
+    def _prepare_fit_analysis(self, activities, connection=None):
         try:
-            with self._garmin_client() as connection:
+            if connection is None:
+                with self._garmin_client() as managed_connection:
+                    analysis = prepare_fit_assessment(self.state, managed_connection, activities)
+            else:
                 analysis = prepare_fit_assessment(self.state, connection, activities)
+        except GarminRateLimitError:
+            raise
         except Exception as exc:
             self.console.write(f"FIT decoding was unavailable; continuing with Garmin summaries: {exc}")
             return {"activities": [], "failures": [{"error": str(exc)}]}
@@ -392,8 +420,13 @@ class InteractiveApp:
         )
         return analysis
 
-    def _fetch_activities(self, start_date, end_date):
-        with self._garmin_client() as connection:
+    def _fetch_activities(self, start_date, end_date, connection=None):
+        if connection is None:
+            with self._garmin_client() as managed_connection:
+                raw = managed_connection.list_activities_by_date(
+                    start_date.isoformat(), end_date.isoformat(), "running"
+                )
+        else:
             raw = connection.list_activities_by_date(start_date.isoformat(), end_date.isoformat(), "running")
         return sorted((ActivitySummary.from_garmin(item) for item in raw), key=lambda item: item.started_at)
 
@@ -404,12 +437,14 @@ class InteractiveApp:
         token_store = self.state.get_setting("garmin_token_store", str(self.state.tokens_dir))
         password = os.getenv("GARMIN_PASSWORD")
         token_path = Path(token_store)
-        if not password and not any(token_path.iterdir()):
+        rate_limiter = GarminRateLimiter(token_path)
+        rate_limiter.check_cooldown()
+        if not password and not has_reusable_tokens(token_path):
             password = self.console.secret("Garmin password (not stored)")
-        return GarminClient(username, password, token_store)
+        return GarminClient(username, password, token_store, rate_limiter=rate_limiter)
 
     def _refresh_if_possible(self):
-        if not self.state.active_plan() or not any(self.state.tokens_dir.iterdir()):
+        if not self.state.active_plan() or not has_reusable_tokens(self.state.tokens_dir):
             return
         try:
             self.refresh(silent=True)

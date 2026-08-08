@@ -3,10 +3,15 @@ from unittest.mock import MagicMock, mock_open, patch
 import pytest
 
 from garminworkouts.garmin.garminclient import GarminClient
+from garminworkouts.garmin.ratelimit import GarminRateLimitError
+
+
+def _rate_limiter():
+    return MagicMock()
 
 
 def _client_with_session():
-    client = GarminClient("user", "password", ".tokens")
+    client = GarminClient("user", "password", ".tokens", rate_limiter=_rate_limiter())
     client.session = MagicMock()
     return client
 
@@ -14,10 +19,35 @@ def _client_with_session():
 @patch("garminconnect.Garmin")
 def test_context_logs_in_with_token_store(garmin):
     session = garmin.return_value
-    with GarminClient("user", "password", ".tokens") as connection:
+    limiter = _rate_limiter()
+    with GarminClient("user", "password", ".tokens", rate_limiter=limiter) as connection:
         assert connection.session is session
     garmin.assert_called_once_with("user", "password")
     session.login.assert_called_once_with(tokenstore=".tokens")
+    assert session.client.skip_strategies == {
+        "mobile+cffi",
+        "widget+cffi",
+        "portal+cffi",
+        "portal+requests",
+    }
+    limiter.before_request.assert_called_once_with()
+    limiter.record_success.assert_called_once_with()
+
+
+@patch("garminconnect.Garmin")
+def test_context_records_login_rate_limit_and_does_not_retry(garmin):
+    from garminconnect import GarminConnectTooManyRequestsError
+
+    limiter = _rate_limiter()
+    limiter.record_rate_limited.return_value = GarminRateLimitError(2_000_000_000)
+    garmin.return_value.login.side_effect = GarminConnectTooManyRequestsError("429")
+
+    with pytest.raises(GarminRateLimitError, match="No automatic retry"):
+        with GarminClient("user", "password", ".tokens", rate_limiter=limiter):
+            pass
+
+    garmin.return_value.login.assert_called_once_with(tokenstore=".tokens")
+    limiter.record_rate_limited.assert_called_once()
 
 
 def test_list_workouts_paginates():
