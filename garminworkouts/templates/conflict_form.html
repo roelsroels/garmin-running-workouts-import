@@ -1,0 +1,5 @@
+<section class="card conflict-card">
+  <div class="card-heading"><div><p class="eyebrow">Garmin inspection</p><h2>{{ preview.summary.overlapping_calendar_entries }} overlapping calendar entr{{ 'y' if preview.summary.overlapping_calendar_entries == 1 else 'ies' }}</h2></div>{% if preview.summary.unresolved_calendar_entries %}<span class="status-pill alert">Blocked</span>{% else %}<span class="status-pill safe">Ready</span>{% endif %}</div>
+  {% if preview.calendar %}<div class="conflict-list">{% for item in preview.calendar %}<div><time>{{ item.date }}</time><strong>{{ item.name }}</strong><span>{{ item.action }}</span></div>{% endfor %}</div>{% else %}<p class="muted">No other running workouts are scheduled on these dates.</p>{% endif %}
+  {% if preview.summary.unresolved_calendar_entries %}<p class="warning-text">At least one entry has no usable Garmin schedule ID. Application is blocked before upload.</p>{% endif %}
+</section>

@@ -1,0 +1,3 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} · Running Planner{% endblock %}
+{% block content %}<section class="error-panel"><p class="eyebrow">The request stopped safely</p><h1>{{ title }}</h1><p>{{ message }}</p><div class="button-row"><a class="button secondary" href="{{ url_for('settings') }}">Settings</a><a class="button primary" href="{{ url_for('dashboard') }}">Overview</a></div></section>{% endblock %}

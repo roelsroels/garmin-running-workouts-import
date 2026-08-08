@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Overview · Running Planner{% endblock %}
+{% block content %}
+  <section class="hero">
+    <div>
+      <p class="eyebrow">Training control centre</p>
+      <h1>Garmin training scheduler &amp; importer</h1>
+      <p class="lede">Set the goal, assess recent Garmin evidence, review every workout, then approve the calendar change.</p>
+    </div>
+    <div class="connection-state {{ 'connected' if connected else 'disconnected' }}">
+      <span class="status-dot"></span>
+      <div><strong>{{ 'Garmin connected' if connected else 'Garmin needs connection' }}</strong><small>{{ username or 'No account configured' }}</small></div>
+    </div>
+  </section>
+
+  <section class="dashboard-grid">
+    <article class="card span-two">
+      <div class="card-heading"><div><p class="eyebrow">Active goal</p><h2>{{ goal_summary }}</h2></div><a class="button secondary" href="{{ url_for('goal_form') }}">{{ 'Edit goal' if goal else 'Create goal' }}</a></div>
+      {% if goal %}
+        <div class="metric-row">
+          <div><strong>{{ goal.runs_per_week }}</strong><span>runs / week</span></div>
+          <div><strong>{{ goal.plan_weeks }}</strong><span>week block</span></div>
+          <div><strong>{{ weekday_names[goal.long_run_day][:3] }}</strong><span>long run</span></div>
+          <div><strong>{{ goal.max_session_minutes }}</strong><span>max minutes</span></div>
+        </div>
+        {% if heart_rate_summary %}<p class="detail-line"><span>HR guidance</span>{{ heart_rate_summary }}</p>{% endif %}
+        {% if goal.constraints %}<p class="detail-line"><span>Constraints</span>{{ goal.constraints }}</p>{% endif %}
+      {% else %}
+        <p class="muted">Create a goal before generating the first proposal.</p>
+      {% endif %}
+    </article>
+
+    <article class="card">
+      <p class="eyebrow">Current block</p>
+      {% if plan %}
+        <h2>{{ plan.start_date.strftime('%d %b') }} – {{ plan.end_date.strftime('%d %b %Y') }}</h2>
+        <progress class="progress-bar" value="{{ summary.completed }}" max="{{ summary.total or 1 }}" aria-label="{{ summary.completed }} of {{ summary.total }} workouts completed"></progress>
+        <div class="progress-labels"><span>{{ summary.completed }} completed</span><span>{{ summary.remaining }} remaining</span></div>
+        <p class="muted">Confidence: {{ plan.confidence }}</p>
+      {% else %}
+        <h2>No applied plan</h2><p class="muted">Your first generated plan will appear here after approval.</p>
+      {% endif %}
+    </article>
+
+    <article class="card next-card">
+      <p class="eyebrow">Next workout</p>
+      {% if next_workout %}
+        <time>{{ next_workout.workout_date }}</time>
+        <h2>{{ next_workout.workout_name }}</h2>
+        <a href="{{ url_for('calendar') }}">View complete calendar →</a>
+      {% else %}
+        <h2>Nothing scheduled</h2><p class="muted">Generate or refresh the current plan.</p>
+      {% endif %}
+    </article>
+  </section>
+
+  <section class="action-panel">
+    <div><p class="eyebrow">Actions</p><h2>What should happen next?</h2></div>
+    <div class="action-grid">
+      <form method="post" action="{{ url_for('generate_plan') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button primary" {% if not goal or not connected %}disabled{% endif %}>Generate a new proposal</button></form>
+      <form method="post" action="{{ url_for('refresh_progress') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button secondary" {% if not plan or not connected %}disabled{% endif %}>Refresh completed runs</button></form>
+      <form method="post" action="{{ url_for('adapt_plan') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button secondary" {% if not plan or not connected %}disabled{% endif %}>Assess and adapt</button></form>
+      <a class="button secondary" href="{{ url_for('cleanup') }}">Clean schedule overlaps</a>
+    </div>
+    {% if not connected %}<p class="help">Connect Garmin in <a href="{{ url_for('settings') }}">Settings</a> to enable history, scheduling, and cleanup.</p>{% endif %}
+  </section>
+{% endblock %}

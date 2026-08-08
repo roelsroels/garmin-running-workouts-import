@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Review HR workout · Running Planner{% endblock %}
+{% block content %}
+  <div class="page-heading"><div><p class="eyebrow">Local draft</p><h1>{{ workout.name }}</h1><p>{{ workout.date }} · {{ workout.description }}</p></div></div>
+  <section class="card"><h2>Sequential steps</h2><div class="conflict-list">{% for step in workout.steps %}<div><time>{{ loop.index }}</time><strong>{{ step.type }} · {{ step.duration }}</strong><span>{% if step.heart_rate_max %}≤{{ step.heart_rate_max }} bpm{% elif step.heart_rate %}{{ step.heart_rate[0] }}–{{ step.heart_rate[1] }} bpm{% elif step.heart_rate_zone %}zone {{ step.heart_rate_zone }}{% else %}no HR target{% endif %}</span></div>{% endfor %}</div></section>
+  {% if preview is none %}
+    <section class="approval-box"><div><h2>Inspect Garmin before scheduling</h2><p>This checks for another workout on {{ workout.date }} without making changes.</p></div><form method="post" action="{{ url_for('inspect_one_off', draft_id=draft_id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button primary">Inspect Garmin schedule</button></form></section>
+  {% else %}
+    {% include "conflict_form.html" %}
+    <form class="approval-box vertical" method="post" action="{{ url_for('apply_one_off', draft_id=draft_id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">{% if preview.summary.overlapping_calendar_entries %}<label class="consent"><input type="checkbox" name="remove_conflicts" value="1" checked><span><strong>Remove listed calendar conflicts after this workout uploads</strong></span></label>{% if preview.summary.obsolete_template_candidates %}<label class="consent"><input type="checkbox" name="delete_templates" value="1"><span><strong>Also delete old workout-library templates</strong></span></label>{% endif %}<label class="consent warning"><input type="checkbox" name="allow_duplicates" value="1"><span><strong>Allow a duplicate date if removal is switched off</strong></span></label>{% endif %}<button class="button danger" {% if preview.summary.unresolved_calendar_entries %}disabled{% endif %}>Schedule workout</button></form>
+  {% endif %}
+{% endblock %}

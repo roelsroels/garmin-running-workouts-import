@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Review proposal · Running Planner{% endblock %}
+{% block content %}
+  <div class="page-heading"><div><p class="eyebrow">Preview only</p><h1>{{ plan.name }}</h1><p>{{ plan.start_date.strftime('%d %b %Y') }} – {{ plan.end_date.strftime('%d %b %Y') }} · confidence {{ plan.confidence }}</p></div><span class="status-pill">{{ plan.status }}</span></div>
+  <section class="card"><div class="card-heading"><div><h2>Why this proposal</h2><p class="muted">Deterministic planner rationale and, optionally, a plain-language LLM explanation.</p></div>{% if llm_enabled %}<form method="post" action="{{ url_for('explain_plan', plan_id=plan.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="inspected" value="{{ 1 if preview is not none else 0 }}"><button class="button secondary">Explain this proposal</button></form>{% endif %}</div><ul class="rationale">{% for reason in plan.rationale %}<li>{{ reason }}</li>{% endfor %}</ul>{% if explanation %}<div class="explanation"><strong>Optional LLM explanation</strong><p>{{ explanation }}</p></div>{% endif %}</section>
+  <section class="card"><h2>Calendar changes</h2><ul class="compact-list">{% for change in changes %}<li>{{ change }}</li>{% endfor %}</ul></section>
+  <section class="schedule-list"><div class="section-title"><p class="eyebrow">Workout chain</p><h2>{{ workouts|length }} scheduled days</h2></div>{% for workout in workouts %}<article class="schedule-row"><time>{{ workout.date }}</time><div><strong>{{ workout.name }}</strong><p>{{ workout.description }}</p></div><span>{{ workout.steps|length }} part{{ '' if workout.steps|length == 1 else 's' }}</span></article>{% endfor %}</section>
+
+  {% if preview is none %}
+    <section class="approval-box"><div><h2>Inspect Garmin before applying</h2><p>The next step reads calendar entries on these dates and shows exactly what would be replaced. It does not make changes.</p></div><form method="post" action="{{ url_for('inspect_plan', plan_id=plan.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button primary">Inspect Garmin schedule</button></form></section>
+  {% else %}
+    {% include "conflict_form.html" %}
+    <form class="approval-box vertical" method="post" action="{{ url_for('apply_plan', plan_id=plan.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      {% if preview.summary.overlapping_calendar_entries %}
+        <label class="consent"><input type="checkbox" name="remove_conflicts" value="1" checked><span><strong>Remove the listed calendar conflicts after the new plan uploads</strong><small>Completed activities and FIT files are never touched.</small></span></label>
+        {% if preview.summary.obsolete_template_candidates %}<label class="consent"><input type="checkbox" name="delete_templates" value="1"><span><strong>Also delete {{ preview.summary.obsolete_template_candidates }} old workout-library template(s)</strong><small>Leave this off if a template may be reused on another date.</small></span></label>{% endif %}
+        <label class="consent warning"><input type="checkbox" name="allow_duplicates" value="1"><span><strong>Allow duplicate dates if conflict removal is switched off</strong><small>This explicit acknowledgement is required to keep overlaps.</small></span></label>
+      {% endif %}
+      <button class="button danger" {% if preview.summary.unresolved_calendar_entries %}disabled{% endif %}>Apply and schedule this plan</button>
+    </form>
+  {% endif %}
+{% endblock %}

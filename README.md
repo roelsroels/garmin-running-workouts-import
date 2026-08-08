@@ -26,6 +26,7 @@ Create structured running workouts from readable YAML, upload them to Garmin Con
 - An on-demand cleanup action that protects the active local plan while removing older Garmin entries on the same dates.
 - Interactive heart-rate caps, custom ranges, and Garmin zones by workout phase.
 - A one-off HR workout builder for arbitrary sequential steps without YAML.
+- A responsive, preview-first web dashboard backed by the same planner, state, Garmin client, and FIT evidence.
 - A deterministic planning engine that works without an LLM, plus optional provider-neutral LLM explanations.
 - Portable SQLite state and file-based session tokens; no macOS Keychain dependency.
 - Versioned YAML/JSON artifacts suitable for future desktop and mobile clients.
@@ -100,6 +101,98 @@ The same workflow is also available as explicit commands:
 ```
 
 YAML commands remain available as an advanced/manual interface and as a transparent interchange format for coaches and future apps.
+
+### CLI and web feature coverage
+
+The web interface does not shell out to an interactive terminal process. It calls the same Python domain classes used by the CLI: `Goal`, `DeterministicPlanner`, `AppState`, `PlanApplier`, `ScheduledConflictCleanup`, `PlanRetirement`, the FIT analyzer, and the rate-limited Garmin client. This keeps validation and Garmin behavior consistent while allowing web requests to remain non-interactive.
+
+The existing CLI commands and parameters remain available. The YAML, activity, export, list, get, schedule, delete, setup, status, refresh, generate, and adapt commands are unchanged. Run `./garmin-workouts COMMAND --help` for their parameters. Not every answer in the terminal wizard has a separate command-line flag: goal fields, phase-specific HR targets, deletion consent, and arbitrary one-off workout steps are interactive terminal inputs or web form inputs. Their generated plans remain YAML/JSON artifacts, so unattended automation can continue to use `plan`, `plan-retire`, and the activity commands.
+
+The `web` command adds `--host`, `--port`, `--web-debug`, and the local-development-only `--insecure-cookie` option. Global `--data-dir`, `--username`, `--token-store`, and `--debug` options still go before the command and are honored by the web launcher. A command-line `--password` is intentionally not carried into the long-running web process; connect through the HTTPS settings form or provide reusable tokens instead.
+
+## Web planner
+
+The web dashboard provides:
+
+- goal, availability, distance/time/pace, planning-period, and constraint forms;
+- independent maximum-BPM, BPM-range, or Garmin-zone targets for every workout phase;
+- current block progress, next workout, and complete calendar views;
+- preview-only plan generation and FIT-driven adaptation;
+- an explicit Garmin conflict inspection and removal decision before application;
+- protected cleanup of duplicates already present in Garmin;
+- a dynamic one-off heart-rate workout builder;
+- Garmin reconnection without storing the password; and
+- optional provider-neutral LLM settings without storing an API key.
+
+For local development only:
+
+```shell
+GARMIN_WEB_SECRET_KEY="$(openssl rand -hex 32)" \
+./garmin-workouts web --insecure-cookie
+```
+
+Open `http://127.0.0.1:8765`. The built-in server is deliberately single-threaded to avoid concurrent Garmin requests. Production should use the supplied single-worker Gunicorn service behind nginx.
+
+### Production deployment example
+
+The supplied systemd and nginx files are intentionally generic examples for an advanced administrator. Their defaults use:
+
+- service account: `garmin-workouts`;
+- application checkout: `/opt/garmin-running-workouts-import`;
+- private mutable state: `/var/lib/garmin-running-workouts`;
+- environment file: `/etc/garmin-running-workouts/web.env`; and
+- example hostname: `planner.example.com`.
+
+Adapt the account, paths, timezone, hostname, and certificate locations to the target system before installing the files. Keep `GARMIN_WORKOUTS_HOME` and systemd's `ReadWritePaths` synchronized.
+
+One possible Debian/Ubuntu setup is:
+
+```shell
+sudo useradd --system --user-group \
+  --home-dir /var/lib/garmin-running-workouts \
+  --create-home --shell /usr/sbin/nologin garmin-workouts
+sudo install -d -o garmin-workouts -g garmin-workouts -m 0700 \
+  /var/lib/garmin-running-workouts
+sudo install -d -o root -g garmin-workouts -m 0750 \
+  /etc/garmin-running-workouts
+
+cd /opt/garmin-running-workouts-import
+uv sync --no-dev --locked
+
+sudo install -o root -g garmin-workouts -m 0640 \
+  .env.web.example /etc/garmin-running-workouts/web.env
+sudo editor /etc/garmin-running-workouts/web.env
+sudo install -o root -g root -m 0644 \
+  deploy/systemd/garmin-running-workouts-web.service \
+  /etc/systemd/system/garmin-running-workouts-web.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now garmin-running-workouts-web
+```
+
+Set `GARMIN_WEB_SECRET_KEY` in `web.env` to a long value generated by a cryptographically secure tool such as `openssl rand -hex 32`. Do not commit the resulting environment file.
+
+Create HTTP Basic Authentication credentials for the website. These are separate from the Garmin account credentials:
+
+```shell
+sudo apt-get install apache2-utils
+sudo htpasswd -c /etc/nginx/.htpasswd-garmin-workouts web-user
+sudo chown root:www-data /etc/nginx/.htpasswd-garmin-workouts
+sudo chmod 640 /etc/nginx/.htpasswd-garmin-workouts
+```
+
+Copy and edit the nginx example, replacing the hostname and certificate paths, then validate it before reloading nginx:
+
+```shell
+sudo cp deploy/nginx/garmin-running-workouts.conf.example \
+  /etc/nginx/sites-available/garmin-running-workouts.conf
+sudo editor /etc/nginx/sites-available/garmin-running-workouts.conf
+sudo ln -s /etc/nginx/sites-available/garmin-running-workouts.conf \
+  /etc/nginx/sites-enabled/garmin-running-workouts.conf
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+The app binds only to `127.0.0.1:8765`; nginx provides HTTPS and Basic Authentication. The web service uses one worker intentionally so the persistent Garmin pacing state cannot be bypassed by simultaneous requests. The deployment is a single-user instance: everyone admitted by the nginx password sees the same runner profile, Garmin tokens, and training state.
 
 ### Garmin rate limiting
 
