@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Training goal · Running Planner{% endblock %}
+{% block content %}
+  <div class="page-heading"><div><p class="eyebrow">Goal and availability</p><h1>Define the next training block</h1><p>Every value remains editable. Heart-rate alerts are user-supplied and are not automatically derived clinical zones.</p></div></div>
+  <form class="form-stack" method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <section class="card form-section">
+      <h2>Primary outcome</h2>
+      <div class="field-grid two">
+        <label>Goal type<select name="goal_type" id="goal-type" required>{% for value, label in goal_types %}<option value="{{ value }}" {% if values.goal_type == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+        <label>Short description<input name="description" value="{{ values.description or '' }}" required maxlength="160"></label>
+        <label class="goal-field goal-distance">Target distance (km)<input name="target_distance_km" type="number" min="0.1" step="0.1" value="{{ values.target_distance_km or '' }}"></label>
+        <label class="goal-field goal-time">Target time<input name="target_time" placeholder="55:00 or 1:05:00" value="{{ values.target_time or '' }}"></label>
+        <label class="goal-field goal-pace">Target pace / km<input name="target_pace" placeholder="5:20" value="{{ values.target_pace or '' }}"></label>
+        <label class="goal-field goal-duration">Minutes at target pace<input name="target_duration_minutes" type="number" min="5" max="180" value="{{ values.target_duration_minutes or '' }}"></label>
+        <label>Target event date <span class="optional">optional</span><input name="target_date" type="date" value="{{ values.target_date or '' }}"></label>
+      </div>
+    </section>
+
+    <section class="card form-section">
+      <h2>Schedule</h2>
+      <div class="field-grid three">
+        <label>Plan start<input name="start_date" type="date" value="{{ values.start_date }}" required></label>
+        <label>Planning weeks<input name="plan_weeks" type="number" min="1" max="12" value="{{ values.plan_weeks }}" required></label>
+        <label>Runs per week<input name="runs_per_week" type="number" min="1" max="7" value="{{ values.runs_per_week }}" required></label>
+        <fieldset class="wide"><legend>Available running days</legend><div class="check-row">{% for weekday in weekday_names %}<label class="check-chip"><input type="checkbox" name="available_days" value="{{ loop.index0 }}" {% if loop.index0 in values.available_days %}checked{% endif %}><span>{{ weekday[:3] }}</span></label>{% endfor %}</div></fieldset>
+        <label>Preferred long-run day<select name="long_run_day">{% for weekday in weekday_names %}<option value="{{ loop.index0 }}" {% if loop.index0 == values.long_run_day %}selected{% endif %}>{{ weekday }}</option>{% endfor %}</select></label>
+        <label>Maximum session (minutes)<input name="max_session_minutes" type="number" min="15" max="360" value="{{ values.max_session_minutes }}"></label>
+        <label>Comfortable long run (km) <span class="optional">optional</span><input name="baseline_long_run_km" type="number" min="0.1" step="0.1" value="{{ values.baseline_long_run_km or '' }}"></label>
+      </div>
+    </section>
+
+    <section class="card form-section">
+      <div class="card-heading"><div><h2>Heart-rate guidance</h2><p class="muted">Choose a different alert style per workout phase, or leave a phase off.</p></div></div>
+      <div class="hr-grid">
+        {% for phase, label in heart_rate_phases %}
+          {% set hr = values.heart_rate.get(phase, {'type': 'none', 'value': ''}) %}
+          <div class="hr-row"><strong>{{ label }}</strong><select name="hr_{{ phase }}_type"><option value="none" {% if hr.type == 'none' %}selected{% endif %}>No alert</option><option value="max" {% if hr.type == 'max' %}selected{% endif %}>Maximum BPM</option><option value="range" {% if hr.type == 'range' %}selected{% endif %}>BPM range</option><option value="zone" {% if hr.type == 'zone' %}selected{% endif %}>Garmin zone</option></select><input name="hr_{{ phase }}_value" value="{{ hr.value }}" placeholder="140, 120-140, or 2"></div>
+        {% endfor %}
+      </div>
+      <label>Quality-step primary target<select name="quality_target_preference"><option value="pace" {% if values.quality_target_preference == 'pace' %}selected{% endif %}>Goal pace when available</option><option value="heart_rate" {% if values.quality_target_preference == 'heart_rate' %}selected{% endif %}>Heart rate</option></select><small>Garmin allows only one intensity target per step.</small></label>
+    </section>
+
+    <section class="card form-section"><h2>Other constraints</h2><label>Notes for review<textarea name="constraints" rows="4" placeholder="Terrain, fixed rest days, injury-related restrictions, coaching notes…">{{ values.constraints or '' }}</textarea></label></section>
+    <div class="sticky-actions"><a class="button ghost" href="{{ url_for('dashboard') }}">Cancel</a><button class="button primary">Save goal</button></div>
+  </form>
+{% endblock %}

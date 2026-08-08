@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block title %}Calendar · Running Planner{% endblock %}
+{% block content %}
+  <div class="page-heading"><div><p class="eyebrow">Active schedule</p><h1>{{ plan.name if plan else 'No active plan' }}</h1><p>{% if plan %}{{ plan.start_date.strftime('%d %b %Y') }} – {{ plan.end_date.strftime('%d %b %Y') }}{% else %}Apply a reviewed proposal to create the calendar.{% endif %}</p></div></div>
+  <section class="schedule-list">{% for workout in rows %}<article class="schedule-row"><time>{{ workout.date }}</time><div><strong>{{ workout.name }}</strong><p>{{ workout.description }}</p></div><span class="status-pill {{ workout.status }}">{{ workout.status }}</span></article>{% else %}<article class="card"><p class="muted">No scheduled workouts to show.</p></article>{% endfor %}</section>
+{% endblock %}

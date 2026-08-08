@@ -222,6 +222,24 @@ def command_app_adapt(args):
     _with_interactive_app(args, lambda app: app.adapt())
 
 
+def command_web(args):
+    from garminworkouts.web import create_app
+
+    with AppState(args.data_dir) as state:
+        if args.username:
+            state.set_setting("garmin_username", args.username)
+        if args.token_store != ".garmin-tokens":
+            state.set_setting("garmin_token_store", str(Path(args.token_store).expanduser().resolve()))
+    app = create_app({"DATA_DIR": args.data_dir, "SESSION_COOKIE_SECURE": not args.insecure_cookie})
+    app.run(
+        host=args.host,
+        port=args.port,
+        debug=args.web_debug or args.debug,
+        use_reloader=False,
+        threaded=False,
+    )
+
+
 def _fetch_activity_summaries(connection, args):
     if args.start_date:
         end_date = args.end_date or date.today().isoformat()
@@ -467,6 +485,17 @@ def main():
 
     parser_adapt = subparsers.add_parser("adapt", description="Assess and propose changes to remaining scheduled days")
     parser_adapt.set_defaults(func=command_app_adapt)
+
+    parser_web = subparsers.add_parser("web", description="Run the local web application server")
+    parser_web.add_argument("--host", default="127.0.0.1", help="Listen address; keep loopback behind nginx")
+    parser_web.add_argument("--port", type=int, default=8765, help="Listen port")
+    parser_web.add_argument("--web-debug", action="store_true", help="Enable Flask debug output without reloading")
+    parser_web.add_argument(
+        "--insecure-cookie",
+        action="store_true",
+        help="Allow the session cookie over plain HTTP for local development only",
+    )
+    parser_web.set_defaults(func=command_web)
 
     args = parser.parse_args()
 
