@@ -18,7 +18,13 @@ Create structured running workouts from readable YAML, upload them to Garmin Con
 - Validation for ISO dates and watch-visible name collisions in the first 15 characters.
 - Chronological listing of completed Garmin activities with distance, duration, pace, and heart rate.
 - Adaptive selection and automatic download of private original FIT assessment bundles.
-- Versioned JSON manifests designed for chat-assisted analysis and future desktop/mobile clients.
+- Local decoding of FIT files with Garmin's official FIT SDK.
+- An interactive, goal-driven planner: no YAML editing is required for normal use.
+- A dashboard with the active goal, completed/missed/remaining days, and the next workout.
+- Supervised mid-block adaptation that replaces only future workouts after explicit approval.
+- A deterministic planning engine that works without an LLM, plus optional provider-neutral LLM explanations.
+- Portable SQLite state and file-based session tokens; no macOS Keychain dependency.
+- Versioned YAML/JSON artifacts suitable for future desktop and mobile clients.
 
 ## Installation
 
@@ -36,6 +42,52 @@ does not depend on Python editable-install loaders:
 ```shell
 ./garmin-workouts --help
 ```
+
+On systems without the POSIX launcher, use the equivalent Python entry point from the repository directory:
+
+```shell
+uv run --no-sync python -m garminworkouts --help
+```
+
+## Interactive planner (recommended)
+
+Start the CLI without a command:
+
+```shell
+./garmin-workouts
+```
+
+On first use, the wizard asks only for the information needed to construct a plan:
+
+1. Garmin Connect username. The password is requested with hidden input only when login is needed and is never saved by the application.
+2. A measurable primary goal, start date, planning period (four weeks by default), available running days, long-run day, and current constraints.
+3. Whether optional LLM explanations should be enabled. The planner itself does not require an LLM.
+4. Whether to fetch recent Garmin history, generate a proposal, and review it before scheduling.
+
+Later starts open a readable dashboard. From there, refresh completed runs, view the full calendar, revise the goal, generate a new block, or assess completed FIT files and propose an adaptation to the remaining dates.
+
+Nothing is changed in Garmin merely by opening the app or generating a proposal. Upload, scheduling, and replacement each require confirmation. When replacing a block, the tool uploads the approved replacement first, then unschedules future entries from the retired block and deletes only its obsolete workout templates. Completed Garmin activities and downloaded FIT files are never deleted.
+
+The architecture-independent local state defaults to `~/.garmin-running-workouts/` and contains:
+
+- `state.sqlite3`: goals, plan history, progress, settings, and an audit trail;
+- `tokens/`: reusable Garmin session tokens;
+- `plans/`: generated, reviewable YAML plans;
+- `activities/`: private FIT assessment bundles and decoded JSON evidence.
+
+Directories are created with private permissions where the operating system supports them. Override the location with `GARMIN_WORKOUTS_HOME` or `--data-dir`. There is deliberately no Keychain integration. Garmin and LLM passwords/API keys are not stored in SQLite; use a session prompt or environment variable when automation needs them.
+
+The same workflow is also available as explicit commands:
+
+```shell
+./garmin-workouts setup
+./garmin-workouts status
+./garmin-workouts refresh
+./garmin-workouts generate
+./garmin-workouts adapt
+```
+
+YAML commands remain available as an advanced/manual interface and as a transparent interchange format for coaches and future apps.
 
 ## Preview a four-week plan
 
@@ -60,7 +112,7 @@ place a plan there, then use the same preview-first workflow:
 
 ## Apply and schedule a plan
 
-Keep credentials local. Never put them in a workout plan, commit them, or share them in chat.
+The interactive planner uses hidden password input and saves reusable session tokens instead of the password. For legacy or unattended YAML commands, environment variables remain available. A `.env` file is an opt-in convenience and stores the password as plain text, so prefer the interactive login where possible and never commit or share the file.
 
 ```shell
 cp .env.example .env
@@ -206,6 +258,14 @@ Garmin's original activity download is normally a ZIP. The tool safely extracts 
 
 The default output is `personal_activities/assessment-DATE/`. This directory is ignored by Git, and the directory, FIT files, and manifest are created with private local permissions. Use `--output` to choose a different private location.
 
+Decode a prepared bundle manually with Garmin's official FIT SDK:
+
+```shell
+./garmin-workouts activities analyze personal_activities/assessment-DATE/manifest.json
+```
+
+This writes `analysis.json` beside the manifest. The interactive `adapt` workflow performs preparation and decoding automatically.
+
 Example chat-assisted workflow after a training block:
 
 ```text
@@ -233,9 +293,11 @@ The project is generic: it does not contain a personal medical profile and does 
 
 ### What is automated today
 
-The software automates Garmin access, recent-activity selection, original FIT download, manifest creation, YAML validation, workout upload, calendar scheduling, and old-plan retirement. It does **not** currently contain an autonomous plan generator or a clinically validated exercise-prescription algorithm.
+The software automates Garmin access, recent-activity selection, original FIT download and decoding, goal-driven plan generation, YAML validation, workout upload, calendar scheduling, progress tracking, supervised adaptation, and old-plan retirement. The built-in planning engine is deterministic and locally auditable; it is **not** a clinically validated exercise-prescription algorithm.
 
-Training decisions are presently made during an explicit assessment step using FIT evidence, the runner's report, the goal, schedule preferences, and user-defined constraints. The result is a reviewable YAML proposal. Garmin receives that fixed proposal only after `--apply`; Garmin and the watch do not rewrite subsequent sessions in response to a completed run.
+Training decisions use the declared goal, demonstrated recent frequency, duration and long-run exposure, and available days. Free-text constraints are retained and displayed for human review; version 0.6 does not attempt to interpret arbitrary medical, injury, or coaching instructions. With insufficient history, the engine lowers its confidence, caps initial frequency, and substitutes familiar easy running for narrow quality targets. The result is always shown as a reviewable proposal. Garmin receives that fixed proposal only after confirmation; Garmin and the watch do not rewrite subsequent sessions themselves.
+
+An optional OpenAI-compatible LLM can explain an adaptation in plain language. It does not create or silently alter workout definitions, and the normal planner works fully without it. The configured base URL and model are portable settings; the API key is supplied at runtime and is not stored by this application.
 
 ### Scope and evidence boundary
 
@@ -277,6 +339,19 @@ Missing heart rate does not invalidate distance and pace analysis. Conversely, a
 ### Construction logic
 
 Four weeks is used as a practical review block: long enough to repeat key sessions and observe direction, but short enough to avoid committing many weeks to an unsuitable progression. It is not a physiologically magic period.
+
+Version 0.6 applies the following intentionally small and auditable rule set:
+
+- Recent history covers up to 42 days. Fewer than six runs or fewer than 21 covered days is labelled `insufficient`; 6–11 runs or fewer than 35 days is `moderate`; broader history is `high` confidence. These labels describe data coverage, not health or readiness.
+- Requested frequency is capped at no more than one run per week above the recently demonstrated frequency; with sparse history it is capped at three.
+- Easy-run duration starts from the recent median session duration, bounded by 20–60 minutes and the runner's declared session limit. Easy intensity uses RPE 2–3 and the talk test, with no invented heart-rate zones.
+- The long run starts from the recent longest run or the runner's supplied comfortable distance. For distance/endurance goals, only week three proposes a 5% increase (rounded to 0.5 km and capped by the distance goal); week four is reduced by 15%. This is a conservative software heuristic, not a universal law.
+- Quality work is omitted when evidence is insufficient. Otherwise, time at a declared target pace is accumulated through controlled repetitions, capped at RPE 7. A sustain-pace goal also requires a requested duration so progression has a measurable endpoint.
+- The engine changes the long-run dimension for distance/endurance goals and the quality-work dimension for pace/time/speed goals, avoiding simultaneous progression of both within this short block.
+- FIT pace-to-heart-rate decoupling is calculated only when enough record-level samples exist. It is reported as descriptive context and is never a standalone progression rule.
+- Heart-rate targets are generated only when a user or coach supplies them explicitly through the advanced YAML interface; the planner does not derive universal BPM zones.
+
+These rules are deliberately conservative and limited. They make the current proposal reproducible and testable while leaving room for future, separately validated planning strategies.
 
 A block is assembled from the runner's goal and demonstrated training frequency. For a runner already sustaining three runs per week, it might contain:
 
@@ -327,7 +402,7 @@ Typical decisions are:
 | Repeated fatigue, illness, pain, declining performance, or failed recovery | Reduce or pause load; seek qualified advice where appropriate |
 | One exceptional or poor run without a repeated pattern | Treat as low-confidence evidence rather than immediately redesigning the block |
 
-Within an active block, adaptation is currently **supervised and explicit**. Conditional instructions can say “progress only if the prior sessions were complete and even,” but the watch cannot inspect the FIT file and choose the branch itself. To alter future sessions, prepare the latest data, review it, generate a revised YAML file, upload the replacement, and retire the superseded plan using the preview-first workflow.
+Within an active block, adaptation is **supervised and explicit**. The `adapt` workflow refreshes adherence, selects and downloads a recent 6–16-run FIT set, decodes original FIT records, rebuilds only dates that have not yet passed, and compares the result with the current schedule. If no workout definition changes, it recommends retaining the plan. If changes exist, it shows each changed date and asks for approval before touching Garmin. This keeps completed dates immutable and every calendar change reviewable.
 
 Each future automated decision should expose the source data, the rule applied, the resulting change, and a confidence label. A plan should become more conservative when data is sparse, inconsistent, or unrepresentative.
 
@@ -370,6 +445,8 @@ The generic health boundary follows preparticipation-screening principles: a per
 ## Changing the training goal
 
 The CLI does not silently infer or persist a training goal from Garmin data. A goal change is an explicit input to assessment and plan generation. This keeps a pace target, distance target, event date, or return-to-running objective from being changed merely because one activity was unusually good or bad.
+
+For normal use, run `./garmin-workouts`, choose **Change the goal or availability**, complete the guided questions, and review the replacement proposal. The existing Garmin calendar remains unchanged unless you approve the replacement. The tool then schedules the new plan, retires only superseded future entries/templates, and leaves completed activities untouched. The manual YAML procedure below remains useful for coaches and advanced troubleshooting.
 
 ### 1. Describe the new goal precisely
 
@@ -470,7 +547,8 @@ At the end of the block—or earlier if sessions are repeatedly incomplete, unex
 ## Security and limitations
 
 - `.env`, `.venv`, the Garmin token store, personal plans, and downloaded activity bundles are ignored by Git.
-- Use a unique Garmin password and protect `.env` with local file permissions.
+- The interactive workflow never persists Garmin or LLM passwords/API keys; protect the portable state directory because session tokens remain sensitive.
+- If legacy automation uses `.env`, protect it with local file permissions and rotate any credential that may have been exposed.
 - Do not run an unattended cloud job containing Garmin credentials.
 - Garmin's private endpoints, MFA, CAPTCHA, or SSO changes can break authentication.
 - Applying and retiring plans are designed to be repeatable, but Garmin's private endpoint behavior can change; always review previews and verify the calendar after synchronization.
