@@ -20,6 +20,7 @@ from garminworkouts.activities import (
 from garminworkouts.config import configreader
 from garminworkouts.fit_analysis import FitAnalyzer
 from garminworkouts.garmin.garminclient import GarminClient
+from garminworkouts.garmin.ratelimit import GarminRateLimitError, has_reusable_tokens
 from garminworkouts.models.running_workout import RunningWorkout
 from garminworkouts.models.training_plan import TrainingPlan
 from garminworkouts.plan import PlanApplier, preview_plan
@@ -300,7 +301,7 @@ def _add_assessment_arguments(parser):
 
 def _garmin_client(args):
     token_store = Path(args.token_store).expanduser()
-    has_tokens = token_store.is_dir() and any(token_store.iterdir())
+    has_tokens = has_reusable_tokens(token_store)
     if not args.username or (not args.password and not has_tokens):
         raise ValueError(
             "Garmin credentials or a reusable token session are required. Set GARMIN_USERNAME and GARMIN_PASSWORD, "
@@ -472,12 +473,15 @@ def main():
     logging_level = logging.DEBUG if args.debug else logging.INFO
     logging.basicConfig(level=logging_level)
 
-    if hasattr(args, "func"):
-        args.func(args)
-    elif sys.stdin.isatty():
-        _with_interactive_app(args, lambda app: app.run())
-    else:
-        parser.print_help()
+    try:
+        if hasattr(args, "func"):
+            args.func(args)
+        elif sys.stdin.isatty():
+            _with_interactive_app(args, lambda app: app.run())
+        else:
+            parser.print_help()
+    except GarminRateLimitError as exc:
+        parser.exit(2, f"{exc}\n")
 
 
 if __name__ == "__main__":

@@ -89,6 +89,32 @@ The same workflow is also available as explicit commands:
 
 YAML commands remain available as an advanced/manual interface and as a transparent interchange format for coaches and future apps.
 
+### Garmin rate limiting
+
+Garmin Connect uses private, unpublished endpoints and may return HTTP 429 when an account or IP address sends too many requests. The client handles this conservatively:
+
+- wrapper-level Garmin calls are spaced by at least one second;
+- password login uses one selected strategy instead of the dependency's cascading strategy chain, preventing one action from generating several alternative login attempts;
+- reusable session tokens are preferred, avoiding password login on normal later runs;
+- the adaptation workflow reuses one authenticated connection for progress refresh, history retrieval, and FIT download;
+- a 429 is never automatically retried;
+- the first 429 creates a persistent 15-minute cooldown, with consecutive failures increasing it to 30 and then 60 minutes;
+- a longer Garmin `Retry-After` response takes precedence;
+- attempts during the cooldown fail immediately and show the local time after which another attempt is allowed.
+
+Cooldown state is stored as `.garmin-request-limits.json` inside the private token directory and is shared by later CLI processes. It contains timestamps only, not credentials. Do not delete it merely to bypass the wait: that cannot remove Garmin's server-side IP limit and may extend the block.
+
+The defaults can be adjusted for controlled deployments:
+
+```shell
+GARMIN_REQUEST_INTERVAL_SECONDS=1
+GARMIN_RATE_LIMIT_COOLDOWN_SECONDS=900
+GARMIN_RATE_LIMIT_MAX_COOLDOWN_SECONDS=3600
+GARMIN_LOGIN_STRATEGY=mobile+requests
+```
+
+Supported single login strategies are `mobile+requests`, `mobile+cffi`, `widget+cffi`, `portal+cffi`, and `portal+requests`. Keep the default unless it cannot authenticate in your environment.
+
 ## Preview a four-week plan
 
 Previewing is offline and does not require Garmin credentials:
