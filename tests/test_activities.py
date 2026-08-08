@@ -116,6 +116,10 @@ def test_archive_extracts_fit_writes_manifest_and_reuses_identical_file(tmp_path
     assert second["activities"][0]["fit_files"][0]["status"] == "reused"
     manifest = json.loads((tmp_path / "assessment" / "manifest.json").read_text())
     assert manifest["selection"]["recommended_count"] == 1
+    guidance = " ".join(manifest["analysis_guidance"]).lower()
+    assert "runner's stated goal" in guidance
+    assert "blood pressure" not in guidance
+    assert "clinician" not in guidance
     assert connection.downloaded == ["7", "7"]
 
 
