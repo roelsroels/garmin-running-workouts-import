@@ -5,6 +5,7 @@ import glob
 import json
 import logging
 import os
+import sys
 from datetime import date
 from pathlib import Path
 
@@ -17,11 +18,13 @@ from garminworkouts.activities import (
     assessment_date_range,
 )
 from garminworkouts.config import configreader
+from garminworkouts.fit_analysis import FitAnalyzer
 from garminworkouts.garmin.garminclient import GarminClient
 from garminworkouts.models.running_workout import RunningWorkout
 from garminworkouts.models.training_plan import TrainingPlan
 from garminworkouts.plan import PlanApplier, preview_plan
 from garminworkouts.retire import PlanRetirement
+from garminworkouts.state import AppState
 from garminworkouts.utils.envdefault import EnvDefault
 from garminworkouts.utils.validators import writeable_dir
 
@@ -186,6 +189,38 @@ def command_activities_prepare(args):
     )
 
 
+def command_activities_analyze(args):
+    analysis = FitAnalyzer().analyze_manifest(args.manifest, args.output)
+    print(json.dumps(analysis, indent=2))
+
+
+def _with_interactive_app(args, action):
+    from garminworkouts.app import InteractiveApp
+
+    with AppState(args.data_dir) as state:
+        return action(InteractiveApp(state))
+
+
+def command_app_setup(args):
+    _with_interactive_app(args, lambda app: app.setup())
+
+
+def command_app_status(args):
+    _with_interactive_app(args, lambda app: app.show_dashboard())
+
+
+def command_app_refresh(args):
+    _with_interactive_app(args, lambda app: app.refresh())
+
+
+def command_app_generate(args):
+    _with_interactive_app(args, lambda app: app.generate_plan(replace_active=bool(app.state.active_plan())))
+
+
+def command_app_adapt(args):
+    _with_interactive_app(args, lambda app: app.adapt())
+
+
 def _fetch_activity_summaries(connection, args):
     if args.start_date:
         end_date = args.end_date or date.today().isoformat()
@@ -264,10 +299,12 @@ def _add_assessment_arguments(parser):
 
 
 def _garmin_client(args):
-    if not args.username or not args.password:
+    token_store = Path(args.token_store).expanduser()
+    has_tokens = token_store.is_dir() and any(token_store.iterdir())
+    if not args.username or (not args.password and not has_tokens):
         raise ValueError(
-            "Garmin credentials are required for this command. Set GARMIN_USERNAME and GARMIN_PASSWORD "
-            "or pass --username and --password before the command name."
+            "Garmin credentials or a reusable token session are required. Set GARMIN_USERNAME and GARMIN_PASSWORD, "
+            "pass --username and --password before the command name, or use the interactive setup."
         )
     return GarminClient(
         username=args.username,
@@ -285,9 +322,10 @@ def _running_workout_from_config(config):
 
 def main():
     load_dotenv()
-    parser = argparse.ArgumentParser(
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter, description="Manage Garmin Connect workout(s)"
-    )
+    # Never use ArgumentDefaultsHelpFormatter here: legacy credentials can be
+    # sourced from environment variables, and secret defaults must not appear
+    # in --help output.
+    parser = argparse.ArgumentParser(description="Manage Garmin Connect workout(s)")
     parser.add_argument(
         "--username",
         "-u",
@@ -305,6 +343,11 @@ def main():
         help="Garmin Connect account password",
     )
     parser.add_argument("--token-store", default=".garmin-tokens", help="Directory for Garmin authentication tokens")
+    parser.add_argument(
+        "--data-dir",
+        default=os.getenv("GARMIN_WORKOUTS_HOME", "~/.garmin-running-workouts"),
+        help="Portable local application state directory",
+    )
     parser.add_argument("--debug", action="store_true", help="Enables more detailed messages")
 
     subparsers = parser.add_subparsers(title="Commands")
@@ -402,6 +445,28 @@ def main():
     )
     parser_activities_prepare.set_defaults(func=command_activities_prepare)
 
+    parser_activities_analyze = activity_subparsers.add_parser(
+        "analyze", description="Decode a prepared FIT manifest with Garmin's official FIT SDK"
+    )
+    parser_activities_analyze.add_argument("manifest", help="Path to a prepared manifest.json")
+    parser_activities_analyze.add_argument("--output", help="Output analysis.json path")
+    parser_activities_analyze.set_defaults(func=command_activities_analyze)
+
+    parser_setup = subparsers.add_parser("setup", description="Run the interactive first-time setup")
+    parser_setup.set_defaults(func=command_app_setup)
+
+    parser_status = subparsers.add_parser("status", description="Show the active goal and locally stored plan progress")
+    parser_status.set_defaults(func=command_app_status)
+
+    parser_refresh = subparsers.add_parser("refresh", description="Refresh completed runs for the active plan")
+    parser_refresh.set_defaults(func=command_app_refresh)
+
+    parser_generate = subparsers.add_parser("generate", description="Generate and review a goal-driven training plan")
+    parser_generate.set_defaults(func=command_app_generate)
+
+    parser_adapt = subparsers.add_parser("adapt", description="Assess and propose changes to remaining scheduled days")
+    parser_adapt.set_defaults(func=command_app_adapt)
+
     args = parser.parse_args()
 
     logging_level = logging.DEBUG if args.debug else logging.INFO
@@ -409,8 +474,10 @@ def main():
 
     if hasattr(args, "func"):
         args.func(args)
+    elif sys.stdin.isatty():
+        _with_interactive_app(args, lambda app: app.run())
     else:
-        parser.print_usage()
+        parser.print_help()
 
 
 if __name__ == "__main__":
