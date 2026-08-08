@@ -131,3 +131,33 @@ def test_sustain_pace_goal_requires_a_duration():
             start_date=date.today(),
             target_pace_seconds_per_km=360,
         )
+
+
+def test_goal_validates_and_normalizes_heart_rate_targets():
+    goal = Goal(
+        goal_type="endurance",
+        description="Build endurance",
+        start_date=date.today(),
+        heart_rate_targets={
+            "easy": {"heart_rate_max": "140"},
+            "long": {"heart_rate": "120-145"},
+            "quality": {"heart_rate_zone": 4},
+        },
+        quality_target_preference="heart_rate",
+    )
+
+    assert goal.heart_rate_targets == {
+        "easy": {"heart_rate_max": 140},
+        "long": {"heart_rate": [120, 145]},
+        "quality": {"heart_rate_zone": 4},
+    }
+
+
+def test_heart_rate_quality_preference_requires_quality_target():
+    with pytest.raises(ValueError, match="quality heart-rate target"):
+        Goal(
+            goal_type="endurance",
+            description="Build endurance",
+            start_date=date.today(),
+            quality_target_preference="heart_rate",
+        )

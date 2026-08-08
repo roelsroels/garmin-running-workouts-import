@@ -12,13 +12,21 @@ from garminworkouts.garmin.ratelimit import (
     has_reusable_tokens,
 )
 from garminworkouts.llm import LLMConfig, OpenAICompatibleAdvisor
+from garminworkouts.models.heart_rate import HeartRateRange, validate_heart_rate_zone
 from garminworkouts.models.training_plan import TrainingPlan
 from garminworkouts.plan import PlanApplier
 from garminworkouts.planner import DeterministicPlanner, write_plan
-from garminworkouts.retire import PlanRetirement
+from garminworkouts.retire import PlanRetirement, ScheduledConflictCleanup
 from garminworkouts.state import Goal
 
 WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+HEART_RATE_PHASES = (
+    ("warmup", "Warm-up and cooldown"),
+    ("easy", "Easy running"),
+    ("long", "Long runs"),
+    ("quality", "Quality work intervals"),
+    ("recovery", "Recoveries between intervals"),
+)
 
 
 class Console:
@@ -78,6 +86,8 @@ class InteractiveApp:
                 "Assess progress and adapt the remaining plan" if active_plan else "Create the first training plan",
                 "Change the goal or availability",
                 "View the complete planned calendar",
+                "Review and clean Garmin schedule overlaps",
+                "Create a one-off heart-rate workout",
                 "Garmin connection and optional LLM settings",
                 "Exit",
             ]
@@ -92,6 +102,10 @@ class InteractiveApp:
                 elif choice == 4:
                     self.show_calendar()
                 elif choice == 5:
+                    self.clean_schedule_overlaps()
+                elif choice == 6:
+                    self.create_heart_rate_workout()
+                elif choice == 7:
                     self.settings()
                 else:
                     return
@@ -120,6 +134,8 @@ class InteractiveApp:
             )
             if goal.constraints:
                 self.console.write(f"  Constraints for review: {goal.constraints}")
+            if goal.heart_rate_targets:
+                self.console.write(f"  Heart-rate guidance: {_format_heart_rate_targets(goal.heart_rate_targets)}")
         if not plan:
             self.console.write("Current block")
             self.console.write("  No plan has been applied yet.")
@@ -275,6 +291,126 @@ class InteractiveApp:
         elif choice == 2:
             self.configure_llm()
 
+    def clean_schedule_overlaps(self):
+        active_record = self.state.active_plan()
+        if not active_record:
+            self.console.write("There is no active local plan to protect during cleanup.")
+            return []
+
+        active_plan = TrainingPlan(active_record.config)
+        with self._garmin_client() as connection:
+            decision = self._review_schedule_conflicts(
+                active_plan,
+                connection,
+                replacement_pending=False,
+            )
+            if decision["conflict_count"] == 0:
+                self.console.write("No overlapping Garmin schedule entries were found.")
+                return []
+            if not decision["proceed"]:
+                self.console.write("The Garmin schedule was left unchanged.")
+                return []
+            actions = decision["cleanup"].apply(
+                decision["preview"],
+                delete_templates=decision["delete_templates"],
+            )
+
+        self.state.record_event(
+            "schedule-overlaps-cleaned",
+            {
+                "active_plan_id": active_record.id,
+                "actions": actions,
+            },
+        )
+        self.console.write("The overlapping Garmin schedule entries were removed.")
+        return actions
+
+    def create_heart_rate_workout(self):
+        workout_date = _parse_date(
+            self.console.ask(
+                "Workout date (YYYY-MM-DD)",
+                (self.today + timedelta(days=1)).isoformat(),
+            )
+        )
+        if workout_date < self.today:
+            raise ValueError("A new one-off workout cannot be scheduled in the past")
+        name = self.console.ask("Workout name", f"{workout_date:%y%m%d} HR Run")
+        description = self.console.ask("Workout description", "Interactive heart-rate workout")
+        step_count = self._ask_int("Number of sequential steps", 2, 1, 20)
+        step_types = ["warmup", "interval", "recovery", "cooldown"]
+        target_types = ["Maximum BPM", "BPM range", "Garmin HR zone", "No HR target"]
+        steps = []
+        targeted_steps = 0
+        for index in range(1, step_count + 1):
+            self.console.write(f"Step {index}")
+            step_type = step_types[
+                self.console.choose("Step type", [item.title() for item in step_types], min(index, 4)) - 1
+            ]
+            duration = _clock(_parse_clock(self.console.ask("Duration (MM:SS or H:MM:SS)", "10:00")))
+            target_choice = self.console.choose("Heart-rate target", target_types, 1)
+            step = {"type": step_type, "duration": duration}
+            if target_choice == 1:
+                value = self.console.ask("Maximum BPM")
+                step.update(_parse_heart_rate_target("heart_rate_max", value))
+                targeted_steps += 1
+            elif target_choice == 2:
+                value = self.console.ask("BPM range, e.g. 120-140")
+                step.update(_parse_heart_rate_target("heart_rate", value))
+                targeted_steps += 1
+            elif target_choice == 3:
+                value = self.console.ask("Garmin zone 1-5")
+                step.update(_parse_heart_rate_target("heart_rate_zone", value))
+                targeted_steps += 1
+            steps.append(step)
+        if not targeted_steps:
+            raise ValueError("A heart-rate workout must contain at least one HR-targeted step")
+
+        config = {
+            "name": f"One-off HR workout {workout_date.isoformat()}",
+            "workouts": [
+                {
+                    "date": workout_date.isoformat(),
+                    "sport": "running",
+                    "name": name,
+                    "description": description,
+                    "steps": steps,
+                }
+            ],
+        }
+        plan = TrainingPlan(config)
+        self.console.write("Proposed one-off workout")
+        self.console.write(f"  {workout_date.isoformat()}  {name}  {description}")
+        for index, step in enumerate(steps, 1):
+            target = _format_step_heart_rate(step) or "no HR target"
+            self.console.write(f"  Step {index}: {step['type']} {step['duration']} · {target}")
+        if not self.console.confirm("Apply and schedule this workout in Garmin Connect?", default=False):
+            self.console.write("No Garmin changes were made.")
+            return None
+
+        with self._garmin_client() as connection:
+            decision = self._review_schedule_conflicts(plan, connection)
+            if not decision["proceed"]:
+                self.console.write("No Garmin changes were made.")
+                return None
+            apply_actions = PlanApplier(plan, connection).apply(schedule=True)
+            cleanup_actions = []
+            if decision["cleanup"] is not None:
+                cleanup_actions = decision["cleanup"].apply(
+                    decision["preview"],
+                    delete_templates=decision["delete_templates"],
+                )
+        self.state.record_event(
+            "one-off-heart-rate-workout-applied",
+            {
+                "date": workout_date.isoformat(),
+                "name": name,
+                "apply_actions": apply_actions,
+                "conflict_cleanup_actions": cleanup_actions,
+            },
+        )
+        self.console.write("The one-off heart-rate workout was scheduled successfully.")
+        return config
+
     def configure_garmin(self, test_connection=True):
         current = self.state.get_setting("garmin_username", os.getenv("GARMIN_USERNAME", ""))
         username = self.console.ask("Garmin Connect username", current)
@@ -369,6 +505,11 @@ class InteractiveApp:
         baseline_default = current.baseline_long_run_km if current else None
         baseline_text = self.console.ask("Current comfortable long-run distance in km (optional)", baseline_default)
         baseline_long = float(baseline_text) if baseline_text not in (None, "") else None
+        heart_rate_targets, quality_target_preference = self.heart_rate_wizard(
+            current.heart_rate_targets if current else {},
+            current.quality_target_preference if current else "pace",
+            has_quality_pace=bool(target_pace or (target_time and distance)),
+        )
         constraints = self.console.ask("Optional training constraints", current.constraints if current else "") or ""
         target_date_default = current.target_date.isoformat() if current and current.target_date else ""
         target_date_text = self.console.ask("Target event/date (optional, YYYY-MM-DD)", target_date_default)
@@ -389,8 +530,55 @@ class InteractiveApp:
             runs_per_week=runs,
             max_session_minutes=max_minutes,
             baseline_long_run_km=baseline_long,
+            heart_rate_targets=heart_rate_targets,
+            quality_target_preference=quality_target_preference,
             constraints=constraints,
         )
+
+    def heart_rate_wizard(self, current_targets=None, current_preference="pace", has_quality_pace=False):
+        current_targets = current_targets or {}
+        enabled = self.console.confirm(
+            "Add heart-rate goals or limits to generated workouts?",
+            default=bool(current_targets),
+        )
+        if not enabled:
+            return {}, "pace"
+
+        styles = [
+            ("heart_rate_max", "Upper BPM caps"),
+            ("heart_rate", "Custom BPM ranges"),
+            ("heart_rate_zone", "Garmin heart-rate zones"),
+        ]
+        existing_key = next(
+            (key for target in current_targets.values() for key in target if key in dict(styles)),
+            "heart_rate_max",
+        )
+        default_style = next(index for index, item in enumerate(styles, 1) if item[0] == existing_key)
+        selection = self.console.choose("Heart-rate target style", [label for _, label in styles], default_style)
+        target_key = styles[selection - 1][0]
+        self.console.write("Leave a phase empty to use no HR alert there; enter '-' to clear an existing value.")
+
+        targets = {}
+        for phase, label in HEART_RATE_PHASES:
+            existing = current_targets.get(phase, {})
+            default = _heart_rate_input_value(existing) if target_key in existing else None
+            answer = self.console.ask(f"{label} {_heart_rate_prompt_suffix(target_key)}", default)
+            if answer in (None, "") or str(answer).strip().casefold() in {"-", "none"}:
+                continue
+            targets[phase] = _parse_heart_rate_target(target_key, answer)
+        if not targets:
+            raise ValueError("Enable at least one heart-rate phase or answer no to heart-rate guidance")
+
+        preference = "heart_rate" if "quality" in targets and not has_quality_pace else "pace"
+        if "quality" in targets and has_quality_pace:
+            default = 2 if current_preference == "heart_rate" else 1
+            choice = self.console.choose(
+                "Garmin permits one intensity target on a quality step. Which should be primary?",
+                ["Goal pace", "Heart rate"],
+                default,
+            )
+            preference = "pace" if choice == 1 else "heart_rate"
+        return targets, preference
 
     def _fetch_recent_history(self, connection=None):
         return self._fetch_activities(
@@ -453,16 +641,32 @@ class InteractiveApp:
 
     def _apply_replacement(self, new_record, old_record=None):
         new_plan = TrainingPlan(new_record.config)
+        changes_started = False
         try:
             with self._garmin_client() as connection:
+                conflict_decision = self._review_schedule_conflicts(new_plan, connection)
+                if not conflict_decision["proceed"]:
+                    self.console.write("No Garmin changes were made; the proposal remains saved locally.")
+                    return False
+                changes_started = True
                 actions = PlanApplier(new_plan, connection).apply(schedule=True)
+                conflict_actions = []
+                if conflict_decision["cleanup"] is not None:
+                    conflict_actions = conflict_decision["cleanup"].apply(
+                        conflict_decision["preview"],
+                        delete_templates=conflict_decision["delete_templates"],
+                    )
                 retirement_actions = []
                 if old_record:
                     old_plan = TrainingPlan(old_record.config)
                     retirement = PlanRetirement(old_plan, connection, protected_plans=[new_plan], today=self.today)
                     retirement_preview = retirement.preview()
                     retirement_actions = retirement.apply(retirement_preview)
+        except GarminRateLimitError:
+            raise
         except Exception as exc:
+            if not changes_started:
+                raise RuntimeError(f"No Garmin changes were made. Details: {exc}") from exc
             self.state.mark_plan_failed(new_record.id, exc)
             raise RuntimeError(
                 "The replacement was not fully applied. Existing activities were not deleted; "
@@ -477,10 +681,76 @@ class InteractiveApp:
                 "plan_id": new_record.id,
                 "superseded_plan_id": old_record.id if old_record else None,
                 "apply_actions": actions,
+                "conflict_cleanup_actions": conflict_actions,
                 "retirement_actions": retirement_actions,
             },
         )
         self.console.write("The plan was scheduled successfully in Garmin Connect.")
+        return True
+
+    def _review_schedule_conflicts(self, new_plan, connection, replacement_pending=True):
+        cleanup = ScheduledConflictCleanup(new_plan, connection, today=self.today)
+        preview = cleanup.preview()
+        count = preview["summary"]["overlapping_calendar_entries"]
+        if count == 0:
+            return {
+                "proceed": True,
+                "cleanup": None,
+                "preview": None,
+                "delete_templates": False,
+                "conflict_count": 0,
+            }
+
+        self.console.write("Existing Garmin schedule entries overlap this proposal")
+        for item in preview["calendar"]:
+            self.console.write(f"  {item['date']}  {item['name']}")
+        timing = " after the new plan is uploaded" if replacement_pending else " now"
+        remove = self.console.confirm(
+            f"Remove these {count} existing calendar entr{'y' if count == 1 else 'ies'}{timing}?",
+            default=True,
+        )
+        if not remove:
+            if not replacement_pending:
+                return {
+                    "proceed": False,
+                    "cleanup": None,
+                    "preview": None,
+                    "delete_templates": False,
+                    "conflict_count": count,
+                }
+            proceed = self.console.confirm(
+                "Continue and knowingly keep multiple scheduled workouts on those dates?",
+                default=False,
+            )
+            return {
+                "proceed": proceed,
+                "cleanup": None,
+                "preview": None,
+                "delete_templates": False,
+                "conflict_count": count,
+            }
+
+        unresolved = preview["summary"]["unresolved_calendar_entries"]
+        if unresolved:
+            raise RuntimeError(
+                f"{unresolved} overlapping Garmin entry lacks a schedule ID; replacement is blocked before upload"
+            )
+        template_count = preview["summary"]["obsolete_template_candidates"]
+        delete_templates = False
+        if template_count:
+            delete_templates = self.console.confirm(
+                f"Also delete the {template_count} obsolete workout template"
+                f"{'s' if template_count != 1 else ''} from the Garmin workout library? "
+                "A template might be used on another date; completed activities are unaffected.",
+                default=True,
+            )
+        return {
+            "proceed": True,
+            "cleanup": cleanup,
+            "preview": preview,
+            "delete_templates": delete_templates,
+            "conflict_count": count,
+        }
 
     def _optional_llm_explanation(self, proposal, progress, changes):
         config = LLMConfig(
@@ -639,3 +909,55 @@ def _parse_day(value):
 
 def _format_days(days):
     return ",".join(WEEKDAYS[day][:3] for day in days)
+
+
+def _parse_heart_rate_target(target_key, value):
+    if target_key == "heart_rate_max":
+        heart_rate = HeartRateRange.from_maximum(value)
+        return {target_key: heart_rate.upper}
+    if target_key == "heart_rate":
+        heart_rate = HeartRateRange.from_config(value)
+        return {target_key: list(heart_rate.to_bpm_bounds())}
+    return {target_key: validate_heart_rate_zone(int(value))}
+
+
+def _heart_rate_prompt_suffix(target_key):
+    return {
+        "heart_rate_max": "maximum BPM (optional)",
+        "heart_rate": "BPM range, e.g. 120-140 (optional)",
+        "heart_rate_zone": "Garmin zone 1-5 (optional)",
+    }[target_key]
+
+
+def _heart_rate_input_value(target):
+    if "heart_rate_max" in target:
+        return str(target["heart_rate_max"])
+    if "heart_rate" in target:
+        return "-".join(str(value) for value in target["heart_rate"])
+    if "heart_rate_zone" in target:
+        return str(target["heart_rate_zone"])
+    return None
+
+
+def _format_heart_rate_targets(targets):
+    labels = dict(HEART_RATE_PHASES)
+    values = []
+    for phase, target in targets.items():
+        if "heart_rate_max" in target:
+            description = f"≤{target['heart_rate_max']} bpm"
+        elif "heart_rate" in target:
+            description = f"{target['heart_rate'][0]}-{target['heart_rate'][1]} bpm"
+        else:
+            description = f"zone {target['heart_rate_zone']}"
+        values.append(f"{labels.get(phase, phase)} {description}")
+    return "; ".join(values)
+
+
+def _format_step_heart_rate(step):
+    if "heart_rate_max" in step:
+        return f"HR ≤{step['heart_rate_max']} bpm"
+    if "heart_rate" in step:
+        return f"HR {step['heart_rate'][0]}-{step['heart_rate'][1]} bpm"
+    if "heart_rate_zone" in step:
+        return f"Garmin HR zone {step['heart_rate_zone']}"
+    return ""

@@ -3,7 +3,7 @@ from datetime import date
 import pytest
 
 from garminworkouts.models.training_plan import TrainingPlan
-from garminworkouts.retire import PlanRetirement
+from garminworkouts.retire import PlanRetirement, ScheduledConflictCleanup
 
 
 def _plan(entries, name="Old block"):
@@ -29,6 +29,15 @@ def _workout(workout_id, name):
         "ownerId": 8,
         "workoutName": name,
         "sportType": {"sportTypeId": 1, "sportTypeKey": "running"},
+    }
+
+
+def _cycling_workout(workout_id, name):
+    return {
+        "workoutId": workout_id,
+        "ownerId": 8,
+        "workoutName": name,
+        "sportType": {"sportTypeId": 2, "sportTypeKey": "cycling"},
     }
 
 
@@ -145,3 +154,85 @@ def test_duplicate_target_workout_names_are_rejected():
 
     with pytest.raises(ValueError, match="duplicate target"):
         PlanRetirement(plan, connection).preview()
+
+
+def test_conflict_cleanup_finds_overlapping_remote_schedule_and_protects_replacement():
+    replacement = _plan([("2026-08-13", "260813 New"), ("2026-08-16", "260816 New")], name="New")
+    connection = FakeConnection(
+        workouts=[
+            _workout(101, "260813 Old"),
+            _workout(102, "260813 New"),
+            _workout(103, "Unrelated"),
+        ],
+        scheduled={
+            "calendarItems": [
+                {"id": 201, "workoutId": 101, "date": "2026-08-13"},
+                {"id": 202, "workoutId": 102, "date": "2026-08-13"},
+                {"id": 203, "workoutId": 103, "date": "2026-08-20"},
+            ]
+        },
+    )
+    cleanup = ScheduledConflictCleanup(replacement, connection, today=date(2026, 8, 10))
+
+    preview = cleanup.preview()
+    actions = cleanup.apply(preview, delete_templates=True)
+
+    assert preview["summary"] == {
+        "overlapping_calendar_entries": 1,
+        "unresolved_calendar_entries": 0,
+        "obsolete_template_candidates": 1,
+    }
+    assert connection.unscheduled == [201]
+    assert connection.deleted == [101]
+    assert [action["action"] for action in actions] == [
+        "unscheduled-conflict",
+        "deleted-conflicting-workout-template",
+    ]
+
+
+def test_conflict_cleanup_blocks_unresolved_schedule_without_changes():
+    replacement = _plan([("2026-08-13", "260813 New")], name="New")
+    connection = FakeConnection(
+        workouts=[_workout(101, "260813 Old")],
+        scheduled={"calendarItems": [{"workoutId": 101, "date": "2026-08-13"}]},
+    )
+    cleanup = ScheduledConflictCleanup(replacement, connection, today=date(2026, 8, 10))
+    preview = cleanup.preview()
+
+    with pytest.raises(RuntimeError, match="schedule ID"):
+        cleanup.apply(preview, delete_templates=True)
+    assert not connection.unscheduled
+    assert not connection.deleted
+
+
+def test_conflict_cleanup_never_targets_non_running_workouts():
+    replacement = _plan([("2026-08-13", "260813 New")], name="New")
+    connection = FakeConnection(
+        workouts=[_cycling_workout(501, "Bike intervals")],
+        scheduled={"calendarItems": [{"id": 601, "workoutId": 501, "date": "2026-08-13"}]},
+    )
+
+    preview = ScheduledConflictCleanup(replacement, connection, today=date(2026, 8, 10)).preview()
+
+    assert preview["summary"]["overlapping_calendar_entries"] == 0
+
+
+def test_conflict_cleanup_keeps_one_exact_schedule_and_removes_extra_duplicates():
+    replacement = _plan([("2026-08-13", "260813 New")], name="New")
+    connection = FakeConnection(
+        workouts=[_workout(102, "260813 New")],
+        scheduled={
+            "calendarItems": [
+                {"id": 201, "workoutId": 102, "date": "2026-08-13"},
+                {"id": 202, "workoutId": 102, "date": "2026-08-13"},
+            ]
+        },
+    )
+
+    cleanup = ScheduledConflictCleanup(replacement, connection, today=date(2026, 8, 10))
+    preview = cleanup.preview()
+    cleanup.apply(preview, delete_templates=True)
+
+    assert [item["scheduled_workout_id"] for item in preview["calendar"]] == [202]
+    assert connection.unscheduled == [202]
+    assert connection.deleted == []

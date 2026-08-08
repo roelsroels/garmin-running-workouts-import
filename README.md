@@ -22,6 +22,10 @@ Create structured running workouts from readable YAML, upload them to Garmin Con
 - An interactive, goal-driven planner: no YAML editing is required for normal use.
 - A dashboard with the active goal, completed/missed/remaining days, and the next workout.
 - Supervised mid-block adaptation that replaces only future workouts after explicit approval.
+- Garmin-side overlap detection with explicit consent to retire pre-existing schedules and obsolete templates.
+- An on-demand cleanup action that protects the active local plan while removing older Garmin entries on the same dates.
+- Interactive heart-rate caps, custom ranges, and Garmin zones by workout phase.
+- A one-off HR workout builder for arbitrary sequential steps without YAML.
 - A deterministic planning engine that works without an LLM, plus optional provider-neutral LLM explanations.
 - Portable SQLite state and file-based session tokens; no macOS Keychain dependency.
 - Versioned YAML/JSON artifacts suitable for future desktop and mobile clients.
@@ -67,6 +71,14 @@ On first use, the wizard asks only for the information needed to construct a pla
 Later starts open a readable dashboard. From there, refresh completed runs, view the full calendar, revise the goal, generate a new block, or assess completed FIT files and propose an adaptation to the remaining dates.
 
 Nothing is changed in Garmin merely by opening the app or generating a proposal. Upload, scheduling, and replacement each require confirmation. When replacing a block, the tool uploads the approved replacement first, then unschedules future entries from the retired block and deletes only its obsolete workout templates. Completed Garmin activities and downloaded FIT files are never deleted.
+
+Before uploading, the CLI also checks Garmin itself for already scheduled workouts on every proposed date. This catches schedules made by older YAML versions or other tools that are absent from the local planner database. It lists each conflict and asks whether to remove the old calendar entries. Template deletion is a separate confirmation. Declining removal requires a second explicit confirmation before duplicate calendar entries are allowed.
+
+If duplicates already exist, choose **Review and clean Garmin schedule overlaps** from the main menu. The active local plan is treated as the version to keep. The tool previews older running workouts scheduled on those same dates, asks before unscheduling them, and separately asks whether their workout-library templates may also be deleted. A template can be reused on another calendar date, so retain it when unsure. This operation never deletes completed activities.
+
+During goal setup, optional heart-rate guidance can be configured separately for warm-up/cooldown, easy running, long runs, quality work, and interval recovery. Choose upper BPM caps, BPM ranges, or Garmin zones. These are user-supplied watch alerts—not calculated or clinically validated zones. Garmin supports only one intensity target per step, so when quality work has both goal pace and HR guidance, the wizard asks which target should be primary.
+
+The main menu also includes **Create a one-off heart-rate workout**. It builds sequential time-based steps interactively, enabling workouts such as 10 minutes at a 120 bpm maximum followed by 15 minutes at a 140 bpm maximum without editing YAML.
 
 The architecture-independent local state defaults to `~/.garmin-running-workouts/` and contains:
 
