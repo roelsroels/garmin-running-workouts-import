@@ -29,6 +29,7 @@ def test_web_dashboard_goal_calendar_and_settings_render(tmp_path):
     dashboard = client.get("/")
     assert dashboard.status_code == 200
     assert b"Garmin training scheduler &amp; importer" in dashboard.data
+    assert b'rel="icon" href="/static/favicon.svg" type="image/svg+xml"' in dashboard.data
     assert b">roels</a>" in dashboard.data
     assert b"https://github.com/roelsroels/garmin-running-workouts-import" in dashboard.data
     assert b"https://cdnjs.buymeacoffee.com/1.0.0/button.prod.min.js" in dashboard.data
@@ -38,6 +39,14 @@ def test_web_dashboard_goal_calendar_and_settings_render(tmp_path):
         response = client.get(path)
         assert response.status_code == 200
         assert b"Running Planner" in response.data
+
+
+def test_web_favicon_is_served_as_svg(tmp_path):
+    response = _app(tmp_path).test_client().get("/static/favicon.svg")
+
+    assert response.status_code == 200
+    assert response.mimetype == "image/svg+xml"
+    assert b'viewBox="0 0 64 64"' in response.data
 
 
 def test_web_rejects_post_without_csrf(tmp_path):
