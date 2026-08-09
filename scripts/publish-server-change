@@ -1,0 +1,179 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+usage() {
+    cat <<'EOF'
+Usage:
+  scripts/publish-server-change [--yes] [--no-restart] "COMMIT MESSAGE" [PATH ...]
+
+Safely publish changes made in a deployment checkout:
+  1. fetch and verify that the remote branch is not ahead;
+  2. run tests, lint, formatting, and whitespace checks;
+  3. stage the supplied paths, or tracked changes only when no paths are supplied;
+  4. preview, commit, and push without force; and
+  5. sync production dependencies and restart the web service.
+
+Options:
+  -y, --yes          Skip the final confirmation.
+      --no-restart   Push without syncing dependencies or restarting systemd.
+  -h, --help         Show this help.
+
+Environment overrides:
+  PUBLISH_REMOTE       Git remote to push to (default: origin)
+  PUBLISH_BRANCH       Branch to publish (default: main)
+  GARMIN_WEB_SERVICE   systemd service name (default: garmin-running-workouts-web)
+
+Examples:
+  scripts/publish-server-change "Adjust dashboard copy"
+  scripts/publish-server-change --no-restart "Update documentation" README.md
+EOF
+}
+
+die() {
+    printf 'Error: %s\n' "$*" >&2
+    exit 1
+}
+
+confirmed=false
+restart_service=true
+commit_message=""
+staged_by_script=false
+declare -a publish_paths=()
+
+cleanup_staging() {
+    if [[ "$staged_by_script" == true ]]; then
+        git restore --staged -- . >/dev/null 2>&1 || true
+    fi
+}
+trap cleanup_staging EXIT
+
+while (($#)); do
+    case "$1" in
+        -y|--yes)
+            confirmed=true
+            shift
+            ;;
+        --no-restart)
+            restart_service=false
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        --)
+            shift
+            publish_paths+=("$@")
+            break
+            ;;
+        -*)
+            die "Unknown option: $1"
+            ;;
+        *)
+            if [[ -z "$commit_message" ]]; then
+                commit_message="$1"
+            else
+                publish_paths+=("$1")
+            fi
+            shift
+            ;;
+    esac
+done
+
+[[ -n "$commit_message" ]] || {
+    usage >&2
+    exit 2
+}
+((EUID != 0)) || die "Run this script as the repository owner, not as root"
+
+remote="${PUBLISH_REMOTE:-origin}"
+branch="${PUBLISH_BRANCH:-main}"
+service="${GARMIN_WEB_SERVICE:-garmin-running-workouts-web}"
+[[ "$service" =~ ^[A-Za-z0-9@_.:-]+$ ]] || die "Invalid systemd service name: $service"
+
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || die "Run this inside a Git working tree"
+cd "$repo_root"
+
+current_branch="$(git symbolic-ref --quiet --short HEAD)" || die "Detached HEAD is not supported"
+[[ "$current_branch" == "$branch" ]] || die "Current branch is '$current_branch'; expected '$branch'"
+git remote get-url "$remote" >/dev/null 2>&1 || die "Git remote '$remote' does not exist"
+git diff --cached --quiet || die "The index already contains staged changes; review or unstage them first"
+
+printf 'Fetching %s/%s...\n' "$remote" "$branch"
+git fetch "$remote" "$branch"
+remote_commit="$(git rev-parse --verify FETCH_HEAD)" || die "Remote branch '$remote/$branch' was not found"
+git merge-base --is-ancestor "$remote_commit" HEAD || die \
+    "Remote branch '$remote/$branch' is ahead or has diverged. Reconcile it before publishing."
+
+has_worktree_changes=true
+if [[ -z "$(git status --porcelain --untracked-files=normal)" ]]; then
+    if [[ "$(git rev-parse HEAD)" == "$remote_commit" ]]; then
+        die "There are no local changes or commits to publish"
+    fi
+    has_worktree_changes=false
+    printf 'No working-tree changes found; the existing local commit(s) will be pushed.\n'
+fi
+
+printf 'Running project checks...\n'
+git diff --check
+uv run pytest
+uv run ruff check .
+uv run ruff format --check .
+
+if [[ "$has_worktree_changes" == true ]]; then
+    staged_by_script=true
+    if ((${#publish_paths[@]})); then
+        git add -- "${publish_paths[@]}"
+    else
+        git add --update
+        if [[ -n "$(git ls-files --others --exclude-standard)" ]]; then
+            printf '\nUntracked files were not staged. Pass explicit paths to include intentional new files:\n'
+            git ls-files --others --exclude-standard | sed 's/^/  /'
+        fi
+    fi
+
+    git diff --cached --quiet && die "No changes were staged"
+
+    while IFS= read -r staged_path; do
+        case "$staged_path" in
+            .env|.env.web|*.sqlite|*.sqlite3|*.db|*.fit|*.FIT|*.zip|.garmin-*|*/tokens/*|personal_activities/*|personal_plans/*)
+                die "Refusing to commit private or generated data: $staged_path"
+                ;;
+        esac
+    done < <(git diff --cached --name-only)
+
+    printf '\nChanges ready to publish:\n'
+    git diff --cached --stat
+    git diff --cached
+else
+    printf '\nExisting local commits ready to publish:\n'
+    git log --oneline "$remote_commit"..HEAD
+fi
+
+if [[ "$confirmed" != true ]]; then
+    if ! read -r -p "Publish and deploy the items shown above? [y/N] " reply; then
+        die "Confirmation is required; use --yes only in a controlled workflow"
+    fi
+    [[ "$reply" =~ ^[Yy]$ ]] || die "Cancelled; working-tree changes were preserved"
+fi
+
+if [[ "$has_worktree_changes" == true ]]; then
+    git commit -m "$commit_message"
+    staged_by_script=false
+fi
+
+printf 'Pushing HEAD to %s/%s...\n' "$remote" "$branch"
+git push "$remote" "HEAD:$branch"
+
+if [[ "$restart_service" == true ]]; then
+    printf 'Syncing production dependencies...\n'
+    uv sync --no-dev --locked
+    printf 'Restarting %s...\n' "$service"
+    sudo systemctl restart "$service"
+    sudo systemctl is-active --quiet "$service" || die \
+        "The push succeeded, but systemd service '$service' is not active"
+    printf 'Published %s and deployed successfully.\n' "$(git rev-parse --short HEAD)"
+else
+    printf 'Published %s without restarting the service.\n' "$(git rev-parse --short HEAD)"
+fi

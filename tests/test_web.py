@@ -29,7 +29,7 @@ def test_web_dashboard_goal_calendar_and_settings_render(tmp_path):
     dashboard = client.get("/")
     assert dashboard.status_code == 200
     assert b"Garmin training scheduler &amp; importer" in dashboard.data
-    assert b"Roel van der Made" in dashboard.data
+    assert b">roels</a>" in dashboard.data
     assert b"https://github.com/roelsroels/garmin-running-workouts-import" in dashboard.data
     assert b"https://cdnjs.buymeacoffee.com/1.0.0/button.prod.min.js" in dashboard.data
     assert b'data-text="Buy me a beer"' in dashboard.data
