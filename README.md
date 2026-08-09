@@ -194,6 +194,31 @@ sudo systemctl reload nginx
 
 The app binds only to `127.0.0.1:8765`; nginx provides HTTPS and Basic Authentication. The web service uses one worker intentionally so the persistent Garmin pacing state cannot be bypassed by simultaneous requests. The deployment is a single-user instance: everyone admitted by the nginx password sees the same runner profile, Garmin tokens, and training state.
 
+#### Publishing changes made on the server
+
+Prefer developing in a separate clone and deploying reviewed commits. For an intentional small edit made directly in a deployment checkout, the guarded publishing helper provides a repeatable path:
+
+```shell
+scripts/publish-server-change "Adjust dashboard copy"
+```
+
+It fetches the configured remote, refuses to continue when the remote branch is ahead or divergent, runs the complete checks, and stages tracked modifications and deletions only. It then displays the staged diff and asks before committing, pushing without force, syncing locked production dependencies, and restarting systemd. Untracked files must be named explicitly:
+
+```shell
+scripts/publish-server-change "Add a new web asset" garminworkouts/static/new-asset.svg
+```
+
+Use `--no-restart` for documentation-only changes and `--yes` only in an already controlled non-interactive workflow. Defaults can be changed without editing the script:
+
+```shell
+PUBLISH_REMOTE=origin \
+PUBLISH_BRANCH=main \
+GARMIN_WEB_SERVICE=garmin-running-workouts-web \
+scripts/publish-server-change "Update the planner interface"
+```
+
+The helper refuses known credential, database, token, FIT, archive, and personal-plan paths. It cannot recognize every possible secret, so the displayed staged diff remains the final safety check.
+
 ### Garmin rate limiting
 
 Garmin Connect uses private, unpublished endpoints and may return HTTP 429 when an account or IP address sends too many requests. The client handles this conservatively:
