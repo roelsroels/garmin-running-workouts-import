@@ -1,0 +1,43 @@
+# Changelog
+
+All notable changes to Garmin Running Workouts Import are documented here. The project follows
+[Semantic Versioning](https://semver.org/).
+
+## [Unreleased]
+
+## [0.9.0] - 2026-08-10
+
+This is the first tagged release of the running-only fork.
+
+### Added
+
+- A goal-driven interactive planner that creates and manages training blocks without requiring YAML editing.
+- Portable SQLite state for goals, plan history, progress, settings, and an audit trail.
+- Garmin activity discovery, adaptive FIT-file selection, private original-file download, and local FIT decoding.
+- Supervised mid-block assessment and replacement of future workouts after explicit approval.
+- User-supplied heart-rate caps, ranges, or Garmin zones by workout phase, plus a one-off HR workout builder.
+- A responsive web interface for goals, calendar review, plan previews, HR workouts, cleanup, and settings.
+- Garmin-side overlap detection and preview-first retirement of obsolete scheduled workouts and templates.
+- Optional provider-neutral LLM explanations; the deterministic planner remains fully functional without an LLM.
+- Generic systemd and nginx deployment examples, a guarded server publishing helper, and web branding assets.
+
+### Changed
+
+- Refocused the upstream project on running workouts and removed cycling-specific content.
+- Updated workout creation and scheduling for the current `garminconnect` client API.
+- Made planning rules deterministic, conservative, locally auditable, and explicit about their evidence boundary.
+- Standardized local application data under `~/.garmin-running-workouts/` by default.
+
+### Fixed
+
+- Added a loader-independent repository launcher for hardened Python environments.
+- Prevented unrelated duplicate Garmin workout names from blocking plan application.
+- Improved workout-ID resolution, schedule conflict handling, and duplicate-date cleanup.
+- Added authentication cooldowns and request pacing to reduce avoidable Garmin rate-limit responses.
+
+### Security
+
+- Garmin passwords and optional LLM API keys are requested at runtime and are not stored by the application.
+- Reusable Garmin session tokens and the SQLite database are stored with restrictive local permissions.
+- The web interface includes CSRF protection, a restrictive content-security policy, and security headers.
+- Production deployment guidance keeps the application on a private loopback listener behind an authenticated TLS proxy.
