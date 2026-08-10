@@ -4,6 +4,8 @@ Create structured running workouts from readable YAML, upload them to Garmin Con
 
 > Garmin does not publish the web endpoints used by this tool. Garmin may change them without notice, and authentication can occasionally require maintenance. This fork uses the actively maintained `garminconnect` client for the current authenticated API.
 
+Current release: **0.9.0** · [Changelog](CHANGELOG.md) · [Release notes](docs/releases/v0.9.0.md)
+
 ## Features
 
 - Running workouts with warm-up, interval, recovery, rest, cooldown, and other step types.
@@ -451,7 +453,7 @@ The project is generic: it does not contain a personal medical profile and does 
 
 The software automates Garmin access, recent-activity selection, original FIT download and decoding, goal-driven plan generation, YAML validation, workout upload, calendar scheduling, progress tracking, supervised adaptation, and old-plan retirement. The built-in planning engine is deterministic and locally auditable; it is **not** a clinically validated exercise-prescription algorithm.
 
-Training decisions use the declared goal, demonstrated recent frequency, duration and long-run exposure, and available days. Free-text constraints are retained and displayed for human review; version 0.6 does not attempt to interpret arbitrary medical, injury, or coaching instructions. With insufficient history, the engine lowers its confidence, caps initial frequency, and substitutes familiar easy running for narrow quality targets. The result is always shown as a reviewable proposal. Garmin receives that fixed proposal only after confirmation; Garmin and the watch do not rewrite subsequent sessions themselves.
+Training decisions use the declared goal, demonstrated recent frequency, duration and long-run exposure, and available days. Free-text constraints are retained and displayed for human review; the planner does not attempt to interpret arbitrary medical, injury, or coaching instructions. With insufficient history, the engine lowers its confidence, caps initial frequency, and substitutes familiar easy running for narrow quality targets. The result is always shown as a reviewable proposal. Garmin receives that fixed proposal only after confirmation; Garmin and the watch do not rewrite subsequent sessions themselves.
 
 An optional OpenAI-compatible LLM can explain an adaptation in plain language. It does not create or silently alter workout definitions, and the normal planner works fully without it. The configured base URL and model are portable settings; the API key is supplied at runtime and is not stored by this application.
 
@@ -496,7 +498,7 @@ Missing heart rate does not invalidate distance and pace analysis. Conversely, a
 
 Four weeks is used as a practical review block: long enough to repeat key sessions and observe direction, but short enough to avoid committing many weeks to an unsuitable progression. It is not a physiologically magic period.
 
-Version 0.6 applies the following intentionally small and auditable rule set:
+The deterministic planner applies the following intentionally small and auditable rule set:
 
 - Recent history covers up to 42 days. Fewer than six runs or fewer than 21 covered days is labelled `insufficient`; 6–11 runs or fewer than 35 days is `moderate`; broader history is `high` confidence. These labels describe data coverage, not health or readiness.
 - Requested frequency is capped at no more than one run per week above the recently demonstrated frequency; with sparse history it is capped at three.
@@ -505,7 +507,7 @@ Version 0.6 applies the following intentionally small and auditable rule set:
 - Quality work is omitted when evidence is insufficient. Otherwise, time at a declared target pace is accumulated through controlled repetitions, capped at RPE 7. A sustain-pace goal also requires a requested duration so progression has a measurable endpoint.
 - The engine changes the long-run dimension for distance/endurance goals and the quality-work dimension for pace/time/speed goals, avoiding simultaneous progression of both within this short block.
 - FIT pace-to-heart-rate decoupling is calculated only when enough record-level samples exist. It is reported as descriptive context and is never a standalone progression rule.
-- Heart-rate targets are generated only when a user or coach supplies them explicitly through the advanced YAML interface; the planner does not derive universal BPM zones.
+- Heart-rate targets are generated only when a user or coach supplies them explicitly through YAML, the interactive CLI, or the web interface; the planner does not derive universal BPM zones.
 
 These rules are deliberately conservative and limited. They make the current proposal reproducible and testable while leaving room for future, separately validated planning strategies.
 
