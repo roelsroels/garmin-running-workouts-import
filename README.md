@@ -6,6 +6,16 @@ Create structured running workouts from readable YAML, upload them to Garmin Con
 
 Current release: **0.9.0** · [Changelog](CHANGELOG.md) · [Release notes](docs/releases/v0.9.0.md)
 
+## Screenshots
+
+These examples use an anonymized demo runner; they contain no real Garmin credentials or activity data.
+
+![Web dashboard showing the active running goal, heart-rate guidance, training-block progress, and next workout](docs/images/web-dashboard.jpg)
+
+| Four-week training calendar | Heart-rate workout builder |
+| --- | --- |
+| ![Training calendar showing completed and scheduled running workouts](docs/images/web-calendar.jpg) | ![Heart-rate workout builder with sequential time and maximum-BPM steps](docs/images/web-heart-rate-workout.jpg) |
+
 ## Features
 
 - Running workouts with warm-up, interval, recovery, rest, cooldown, and other step types.
