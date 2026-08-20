@@ -5,6 +5,22 @@ All notable changes to Garmin Running Workouts Import are documented here. The p
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-08-20
+
+First stable release of the running-only Garmin planning and scheduling application.
+
+### Added
+
+- An anonymized web-interface screenshot gallery in the README.
+- GitHub sponsorship metadata for the project support link.
+
+### Changed
+
+- The calendar now subdues completed, missed, skipped, and past workout dates.
+- The first scheduled workout on the current date or later is highlighted as **Next**.
+- A workout scheduled for today has a prominent **Today · scheduled** status.
+- Past workouts whose Garmin progress has not yet been refreshed are clearly marked **Past / refresh** rather than presented as the next action.
+
 ## [0.9.0] - 2026-08-10
 
 This is the first tagged release of the running-only fork.
