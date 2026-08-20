@@ -249,16 +249,17 @@ def create_app(config=None):
 
     @app.get("/calendar")
     def calendar():
+        today = date.today().isoformat()
         with _state(app) as state:
             plan = state.active_plan()
             if not plan:
-                return render_template("calendar.html", plan=None, rows=[])
+                return render_template("calendar.html", plan=None, rows=[], today=today)
             progress = {(row["workout_date"], row["workout_name"]): row for row in state.progress(plan.id)}
             rows = []
             for workout in plan.config.get("workouts", []):
                 row = progress.get((str(workout["date"]), workout["name"]), {})
-                rows.append({**workout, "status": row.get("status", "unknown")})
-        return render_template("calendar.html", plan=plan, rows=rows)
+                rows.append({**workout, "date": str(workout["date"]), "status": row.get("status", "unknown")})
+        return render_template("calendar.html", plan=plan, rows=rows, today=today)
 
     @app.get("/cleanup")
     def cleanup():

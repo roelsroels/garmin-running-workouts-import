@@ -208,14 +208,22 @@ def test_calendar_subdues_finished_rows_and_marks_the_next_action(tmp_path):
         rendered = render_template(
             "calendar.html",
             plan=None,
+            today="2030-01-14",
             rows=[
                 {"date": "2030-01-10", "name": "Finished", "description": "Done", "status": "completed"},
                 {"date": "2030-01-12", "name": "Skipped", "description": "Missed", "status": "missed"},
+                {
+                    "date": "2030-01-13",
+                    "name": "Awaiting refresh",
+                    "description": "No activity recorded",
+                    "status": "scheduled",
+                },
                 {"date": "2030-01-14", "name": "Next", "description": "Scheduled", "status": "scheduled"},
                 {"date": "2030-01-16", "name": "Later", "description": "Scheduled", "status": "scheduled"},
             ],
         )
 
-    assert rendered.count("schedule-row is-finished") == 2
+    assert rendered.count("schedule-row is-finished") == 3
     assert rendered.count("schedule-row is-next-action") == 1
+    assert "Past / refresh" in rendered
     assert 'schedule-row is-next-action"><time>2030-01-14' in rendered
