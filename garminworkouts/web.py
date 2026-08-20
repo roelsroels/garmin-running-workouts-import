@@ -249,7 +249,8 @@ def create_app(config=None):
 
     @app.get("/calendar")
     def calendar():
-        today = date.today().isoformat()
+        today_value = date.today()
+        today = today_value.isoformat()
         with _state(app) as state:
             plan = state.active_plan()
             if not plan:
@@ -258,7 +259,20 @@ def create_app(config=None):
             rows = []
             for workout in plan.config.get("workouts", []):
                 row = progress.get((str(workout["date"]), workout["name"]), {})
-                rows.append({**workout, "date": str(workout["date"]), "status": row.get("status", "unknown")})
+                workout_date = date.fromisoformat(str(workout["date"]))
+                status = row.get("status", "scheduled")
+                inferred_missed = status == "scheduled" and workout_date < today_value
+                if inferred_missed:
+                    status = "missed"
+                rows.append(
+                    {
+                        **workout,
+                        "date": workout_date.isoformat(),
+                        "status": status,
+                        "status_label": "Missed · needs refresh" if inferred_missed else status,
+                        "inferred_missed": inferred_missed,
+                    }
+                )
         return render_template("calendar.html", plan=plan, rows=rows, today=today)
 
     @app.get("/cleanup")

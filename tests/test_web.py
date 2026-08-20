@@ -214,17 +214,55 @@ def test_calendar_subdues_finished_rows_and_marks_the_next_action(tmp_path):
                 {"date": "2030-01-12", "name": "Skipped", "description": "Missed", "status": "missed"},
                 {
                     "date": "2030-01-13",
-                    "name": "Awaiting refresh",
+                    "name": "Missed without refresh",
                     "description": "No activity recorded",
-                    "status": "scheduled",
+                    "status": "missed",
+                    "status_label": "Missed · needs refresh",
+                    "inferred_missed": True,
                 },
                 {"date": "2030-01-14", "name": "Next", "description": "Scheduled", "status": "scheduled"},
                 {"date": "2030-01-16", "name": "Later", "description": "Scheduled", "status": "scheduled"},
             ],
         )
 
-    assert rendered.count("schedule-row is-finished") == 3
-    assert rendered.count("schedule-row is-next-action") == 1
-    assert "Past / refresh" in rendered
+    assert rendered.count("is-finished") == 3
+    assert rendered.count("is-next-action") == 1
+    assert "Missed · needs refresh" in rendered
+    assert "is-inferred-missed" in rendered
     assert "Today · scheduled" in rendered
-    assert 'schedule-row is-next-action"><time>2030-01-14' in rendered
+    assert 'is-next-action"><time>2030-01-14' in rendered
+
+
+def test_calendar_infers_missed_for_an_elapsed_unrefreshed_workout(tmp_path):
+    app = _app(tmp_path)
+    missed_date = date.today() - timedelta(days=1)
+    config = {
+        "name": "Missed run block",
+        "metadata": {"goal": {}, "baseline": {}},
+        "workouts": [
+            {
+                "date": missed_date.isoformat(),
+                "sport": "running",
+                "name": "Elapsed easy run",
+                "description": "30 minutes easy",
+                "steps": [{"type": "interval", "duration": "30:00"}],
+            }
+        ],
+    }
+    with AppState(app.config["DATA_DIR"]) as state:
+        goal = state.save_goal(
+            Goal(
+                goal_type="complete_distance",
+                description="Complete ten kilometres",
+                start_date=missed_date,
+                target_distance_km=10,
+            )
+        )
+        record = state.save_plan(goal, config, state.plans_dir / "missed.yaml", "moderate", ("A reason",))
+        state.activate_plan(record.id)
+
+    response = app.test_client().get("/calendar")
+
+    assert response.status_code == 200
+    assert b"Missed \xc2\xb7 needs refresh" in response.data
+    assert b"status-missed is-finished is-inferred-missed" in response.data
