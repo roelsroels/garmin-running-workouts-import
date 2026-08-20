@@ -134,6 +134,7 @@ label small { color: var(--muted); font-weight: 400; line-height: 1.4; }
 .status-pill { display: inline-flex; align-items: center; width: fit-content; min-height: 28px; padding: .25rem .7rem; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); font-size: .75rem; text-transform: uppercase; letter-spacing: .08em; }
 .status-pill.safe, .status-pill.completed { color: var(--mint); border-color: #2f725c; }
 .status-pill.alert, .status-pill.missed { color: var(--red); border-color: #6d3836; }
+.status-pill.today { color: #07110e; background: var(--mint); border-color: var(--mint); }
 .settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; align-items: start; }
 .step-builder { display: grid; gap: .65rem; }
 .step-row { display: grid; grid-template-columns: 2rem 1fr 1fr 1fr 1fr auto; gap: .65rem; align-items: end; padding: .8rem; border: 1px solid var(--line); border-radius: 12px; background: rgba(8, 17, 15, .45); }

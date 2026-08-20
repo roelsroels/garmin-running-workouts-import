@@ -226,4 +226,5 @@ def test_calendar_subdues_finished_rows_and_marks_the_next_action(tmp_path):
     assert rendered.count("schedule-row is-finished") == 3
     assert rendered.count("schedule-row is-next-action") == 1
     assert "Past / refresh" in rendered
+    assert "Today · scheduled" in rendered
     assert 'schedule-row is-next-action"><time>2030-01-14' in rendered
