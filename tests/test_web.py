@@ -1,5 +1,6 @@
 from datetime import date, timedelta
 
+from flask import render_template
 from werkzeug.datastructures import MultiDict
 
 from garminworkouts.state import AppState, Goal
@@ -200,3 +201,21 @@ def test_active_dashboard_calendar_cleanup_and_plan_review_render(tmp_path):
     assert b"300110 Easy30" in calendar.data
     assert b"Inspect Garmin schedule" in cleanup.data
     assert b"A reviewable reason" in review.data
+
+
+def test_calendar_subdues_finished_rows_and_marks_the_next_action(tmp_path):
+    with _app(tmp_path).test_request_context("/calendar"):
+        rendered = render_template(
+            "calendar.html",
+            plan=None,
+            rows=[
+                {"date": "2030-01-10", "name": "Finished", "description": "Done", "status": "completed"},
+                {"date": "2030-01-12", "name": "Skipped", "description": "Missed", "status": "missed"},
+                {"date": "2030-01-14", "name": "Next", "description": "Scheduled", "status": "scheduled"},
+                {"date": "2030-01-16", "name": "Later", "description": "Scheduled", "status": "scheduled"},
+            ],
+        )
+
+    assert rendered.count("schedule-row is-finished") == 2
+    assert rendered.count("schedule-row is-next-action") == 1
+    assert 'schedule-row is-next-action"><time>2030-01-14' in rendered
