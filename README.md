@@ -4,7 +4,7 @@ Create structured running workouts from readable YAML, upload them to Garmin Con
 
 > Garmin does not publish the web endpoints used by this tool. Garmin may change them without notice, and authentication can occasionally require maintenance. This fork uses the actively maintained `garminconnect` client for the current authenticated API.
 
-Current release: **0.9.0** · [Changelog](CHANGELOG.md) · [Release notes](docs/releases/v0.9.0.md)
+Current release: **1.0.0** · [Changelog](CHANGELOG.md) · [Release notes](docs/releases/v1.0.0.md)
 
 ## Screenshots
 
