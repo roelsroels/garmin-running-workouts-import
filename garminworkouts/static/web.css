@@ -111,6 +111,10 @@ label small { color: var(--muted); font-weight: 400; line-height: 1.4; }
 .schedule-row time { color: var(--amber); font-variant-numeric: tabular-nums; }
 .schedule-row p { color: var(--muted); margin: .3rem 0 0; }
 .schedule-row > span { color: var(--muted); font-size: .78rem; }
+.schedule-row.is-finished { opacity: .42; filter: saturate(.25); }
+.schedule-row.is-finished time { color: var(--muted); }
+.schedule-row.is-next-action { border-color: var(--mint); background: linear-gradient(105deg, rgba(26, 68, 54, .95), rgba(16, 28, 25, .95)); box-shadow: 0 0 0 1px rgba(110, 231, 183, .14), 0 12px 30px rgba(0, 0, 0, .15); }
+.schedule-row.is-next-action::before { content: "Next"; color: #07110e; background: var(--mint); border-radius: 999px; padding: .22rem .55rem; font-size: .68rem; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; }
 .rationale, .compact-list { color: var(--muted); line-height: 1.6; padding-left: 1.2rem; }
 .explanation { margin-top: 1rem; padding: 1rem; border-left: 3px solid var(--mint); background: rgba(8, 17, 15, .5); }
 .explanation p { color: var(--muted); line-height: 1.65; white-space: pre-wrap; margin: .5rem 0 0; }
@@ -152,6 +156,7 @@ label small { color: var(--muted); font-weight: 400; line-height: 1.4; }
   .field-grid.two, .field-grid.three { grid-template-columns: 1fr; }
   .hr-row { grid-template-columns: 1fr; }
   .schedule-row { grid-template-columns: 1fr; gap: .35rem; }
+  .schedule-row.is-next-action::before { width: fit-content; }
   .step-row { grid-template-columns: 2rem 1fr; }
   .step-row label { grid-column: 2; }
   .step-row .icon-button { grid-column: 2; }
