@@ -5,14 +5,20 @@ All notable changes to Garmin Running Workouts Import are documented here. The p
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-23
+
+Calendar feedback and completed-workout evidence are now more informative while remaining conservative with Garmin requests.
+
 ### Added
 
 - Completed planned runs now show Garmin's workout execution score in the web and CLI calendars when the FIT activity provides one.
 - Execution scores are fetched once per newly completed planned run and cached locally to avoid repeated Garmin requests.
+- Existing SQLite databases migrate automatically to store execution-score values and checked state.
 
 ### Changed
 
-- Refreshed the anonymized web screenshots to show the current calendar hierarchy, including completed scores, missed dates, today's next workout, and future scheduled runs.
+- Elapsed scheduled workouts without a matched running activity are shown as missed in the web calendar, including a provisional **Missed · needs refresh** state before Garmin progress is refreshed.
+- Refreshed the anonymized web screenshots to show completed scores, missed dates, today's next workout, and future scheduled runs.
 - Updated the README and automation roadmap to distinguish implemented FIT analysis and adaptation features from future work.
 
 ## [1.0.0] - 2026-08-20
