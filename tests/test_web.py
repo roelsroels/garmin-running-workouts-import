@@ -1,8 +1,9 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from flask import render_template
 from werkzeug.datastructures import MultiDict
 
+from garminworkouts.activities import ActivitySummary
 from garminworkouts.state import AppState, Goal
 from garminworkouts.web import create_app
 
@@ -266,3 +267,47 @@ def test_calendar_infers_missed_for_an_elapsed_unrefreshed_workout(tmp_path):
     assert response.status_code == 200
     assert b"Missed \xc2\xb7 needs refresh" in response.data
     assert b"status-missed is-finished is-inferred-missed" in response.data
+
+
+def test_calendar_shows_execution_score_for_completed_run(tmp_path):
+    app = _app(tmp_path)
+    workout_date = date.today()
+    config = {
+        "name": "Scored run block",
+        "metadata": {"goal": {}, "baseline": {}},
+        "workouts": [
+            {
+                "date": workout_date.isoformat(),
+                "sport": "running",
+                "name": "Scored intervals",
+                "description": "Controlled intervals",
+                "steps": [{"type": "interval", "duration": "30:00", "heart_rate_max": 150}],
+            }
+        ],
+    }
+    activity = ActivitySummary(
+        "42",
+        "Scored intervals",
+        datetime.combine(workout_date, datetime.min.time()),
+        "running",
+        execution_score=92,
+        execution_score_checked=True,
+    )
+    with AppState(app.config["DATA_DIR"]) as state:
+        goal = state.save_goal(
+            Goal(
+                goal_type="complete_distance",
+                description="Complete ten kilometres",
+                start_date=workout_date,
+                target_distance_km=10,
+            )
+        )
+        record = state.save_plan(goal, config, state.plans_dir / "scored.yaml", "moderate", ("A reason",))
+        state.activate_plan(record.id)
+        state.refresh_progress(record.id, [activity], today=workout_date)
+
+    response = app.test_client().get("/calendar")
+
+    assert response.status_code == 200
+    assert b"Execution score 92%" in response.data
+    assert b"execution-score good" in response.data

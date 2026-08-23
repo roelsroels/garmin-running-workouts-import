@@ -1,3 +1,4 @@
+import sqlite3
 from datetime import date, datetime
 
 import pytest
@@ -35,12 +36,14 @@ def _config():
     }
 
 
-def _activity(activity_id, activity_date):
+def _activity(activity_id, activity_date, execution_score=None, execution_score_checked=False):
     return ActivitySummary(
         str(activity_id),
         "Run",
         datetime.combine(activity_date, datetime.min.time()),
         "running",
+        execution_score=execution_score,
+        execution_score_checked=execution_score_checked,
     )
 
 
@@ -65,6 +68,46 @@ def test_state_persists_goal_plan_and_progress(tmp_path):
             "scheduled": 0,
             "remaining": 0,
         }
+
+
+def test_state_persists_execution_score_and_checked_state(tmp_path):
+    with AppState(tmp_path / "state") as state:
+        goal = state.save_goal(_goal())
+        plan = state.save_plan(goal, _config(), tmp_path / "plan.yaml", "moderate", ["Reason"])
+        progress = state.refresh_progress(
+            plan.id,
+            [_activity(1, date(2030, 1, 8), execution_score=88, execution_score_checked=True)],
+            today=date(2030, 1, 9),
+        )
+
+        assert progress[0]["execution_score"] == 88
+        assert progress[0]["execution_score_checked_at"] is not None
+
+
+def test_state_migrates_existing_progress_table_for_execution_scores(tmp_path):
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    database = sqlite3.connect(state_dir / "state.sqlite3")
+    database.execute(
+        """
+        CREATE TABLE plan_progress (
+            plan_id INTEGER NOT NULL,
+            workout_date TEXT NOT NULL,
+            workout_name TEXT NOT NULL,
+            status TEXT NOT NULL,
+            activity_id TEXT,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY(plan_id, workout_date, workout_name)
+        )
+        """
+    )
+    database.commit()
+    database.close()
+
+    with AppState(state_dir) as state:
+        columns = {row["name"] for row in state.connection.execute("PRAGMA table_info(plan_progress)")}
+
+    assert {"execution_score", "execution_score_checked_at"} <= columns
 
 
 def test_new_active_goal_retires_previous_goal(tmp_path):

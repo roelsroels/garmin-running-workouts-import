@@ -33,6 +33,20 @@ def _number(value):
     return float(value) if value is not None else None
 
 
+def _execution_score(activity):
+    keys = ("executionScore", "workoutExecutionScore", "workoutScore", "execution_score")
+    containers = (activity, activity.get("summaryDTO") or {}, activity.get("summary") or {})
+    for container in containers:
+        for key in keys:
+            if key not in container:
+                continue
+            score = _number(container.get(key))
+            if score is None or not 0 <= score <= 100:
+                return None, True
+            return int(score) if score.is_integer() else round(score, 1), True
+    return None, False
+
+
 @dataclass(frozen=True)
 class ActivitySummary:
     activity_id: str
@@ -46,6 +60,8 @@ class ActivitySummary:
     max_hr: float | None = None
     average_speed_mps: float | None = None
     elevation_gain_m: float | None = None
+    execution_score: float | int | None = None
+    execution_score_checked: bool = False
     raw: dict = field(default_factory=dict, repr=False, compare=False)
 
     @classmethod
@@ -55,6 +71,7 @@ class ActivitySummary:
             raise ValueError("Garmin activity has no activityId")
 
         activity_type = activity.get("activityType") or activity.get("activityTypeDTO") or {}
+        execution_score, execution_score_checked = _execution_score(activity)
         return cls(
             activity_id=str(activity_id),
             name=str(activity.get("activityName") or "Untitled activity"),
@@ -67,6 +84,8 @@ class ActivitySummary:
             max_hr=_number(activity.get("maxHR")),
             average_speed_mps=_number(activity.get("averageSpeed")),
             elevation_gain_m=_number(activity.get("elevationGain")),
+            execution_score=execution_score,
+            execution_score_checked=execution_score_checked,
             raw=activity,
         )
 
@@ -96,6 +115,7 @@ class ActivitySummary:
             "average_speed_mps": self.average_speed_mps,
             "average_pace_seconds_per_km": self.average_pace_seconds_per_km,
             "elevation_gain_m": self.elevation_gain_m,
+            "execution_score": self.execution_score,
         }
 
 

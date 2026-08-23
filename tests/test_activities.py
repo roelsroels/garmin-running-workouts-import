@@ -63,6 +63,22 @@ def test_activity_summary_normalizes_metrics_and_pace():
     assert activity.to_dict()["average_hr"] == 140
 
 
+def test_activity_summary_reads_execution_score_when_garmin_lists_it():
+    payload = {
+        "activityId": 8,
+        "activityName": "Structured run",
+        "startTimeLocal": "2026-08-01T09:30:00",
+        "activityType": {"typeKey": "running"},
+        "summaryDTO": {"executionScore": 91},
+    }
+
+    activity = ActivitySummary.from_garmin(payload)
+
+    assert activity.execution_score == 91
+    assert activity.execution_score_checked is True
+    assert activity.to_dict()["execution_score"] == 91
+
+
 def test_activity_summary_requires_id_and_start_time():
     with pytest.raises(ValueError, match="activityId"):
         ActivitySummary.from_garmin({"startTimeLocal": "2026-08-01T09:00:00"})

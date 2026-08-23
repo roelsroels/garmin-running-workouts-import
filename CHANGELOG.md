@@ -5,6 +5,11 @@ All notable changes to Garmin Running Workouts Import are documented here. The p
 
 ## [Unreleased]
 
+### Added
+
+- Completed planned runs now show Garmin's workout execution score in the web and CLI calendars when the FIT activity provides one.
+- Execution scores are fetched once per newly completed planned run and cached locally to avoid repeated Garmin requests.
+
 ## [1.0.0] - 2026-08-20
 
 First stable release of the running-only Garmin planning and scheduling application.

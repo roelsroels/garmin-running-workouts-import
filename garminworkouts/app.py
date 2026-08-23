@@ -169,13 +169,17 @@ class InteractiveApp:
         self.console.write(f"{plan.name}")
         for row in self.state.block_progress(plan.id):
             if date.fromisoformat(row["workout_date"]) < plan.start_date:
+                score = self._execution_score_label(row)
                 self.console.write(
-                    f"  {row['workout_date']}  {row['status']:9}  {row['workout_name']}  prior block history"
+                    f"  {row['workout_date']}  {row['status']:9}  {row['workout_name']}  prior block history{score}"
                 )
         for workout in plan.config.get("workouts", []):
             row = progress.get((str(workout["date"]), workout["name"]), {})
             status = row.get("status", "unknown")
-            self.console.write(f"  {workout['date']}  {status:9}  {workout['name']}  {workout.get('description', '')}")
+            score = self._execution_score_label(row)
+            self.console.write(
+                f"  {workout['date']}  {status:9}  {workout['name']}  {workout.get('description', '')}{score}"
+            )
 
     def refresh(self, silent=False, connection=None):
         plan = self.state.active_plan()
@@ -183,13 +187,36 @@ class InteractiveApp:
             if not silent:
                 self.console.write("No active plan to refresh.")
             return []
+        if connection is None:
+            with self._garmin_client() as managed_connection:
+                return self.refresh(silent=silent, connection=managed_connection)
         activities = self._fetch_activities(
             plan.start_date - timedelta(days=1),
             self.today + timedelta(days=1),
             connection=connection,
         )
+        progress_before_refresh = self.state.progress(plan.id)
+        checked_activity_ids = {
+            row["activity_id"]
+            for row in progress_before_refresh
+            if row["activity_id"] and row["execution_score_checked_at"]
+        }
+        planned_dates = {date.fromisoformat(str(workout["date"])) for workout in plan.config.get("workouts", [])}
+        activities, score_errors = FitAnalyzer().enrich_execution_scores(
+            activities,
+            planned_dates,
+            checked_activity_ids,
+            connection,
+        )
         summary = self.state.refresh_progress(plan.id, activities, today=self.today)
-        self.state.record_event("progress-refreshed", {"plan_id": plan.id, "activity_count": len(activities)})
+        self.state.record_event(
+            "progress-refreshed",
+            {
+                "plan_id": plan.id,
+                "activity_count": len(activities),
+                "execution_score_errors": score_errors,
+            },
+        )
         if not silent:
             counts = self.state.progress_summary(plan.id)
             self.console.write(
@@ -197,6 +224,17 @@ class InteractiveApp:
                 f"{counts['remaining']} remaining."
             )
         return summary
+
+    @staticmethod
+    def _execution_score_label(row):
+        score = row.get("execution_score")
+        if score is not None:
+            return f" · execution {score:g}%"
+        if row.get("status") == "completed":
+            return (
+                " · execution unavailable" if row.get("execution_score_checked_at") else " · execution pending refresh"
+            )
+        return ""
 
     def generate_plan(self, replace_active=False):
         goal = self.state.active_goal()

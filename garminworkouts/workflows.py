@@ -81,13 +81,36 @@ class PlannerWorkflow:
         plan = self.state.active_plan()
         if not plan:
             raise ValueError("There is no active plan to refresh")
+        if connection is None:
+            with self.garmin_client() as managed_connection:
+                return self.refresh(connection=managed_connection)
         activities = self.fetch_activities(
             plan.start_date - timedelta(days=1),
             self.today + timedelta(days=1),
             connection=connection,
         )
+        progress_before_refresh = self.state.progress(plan.id)
+        checked_activity_ids = {
+            row["activity_id"]
+            for row in progress_before_refresh
+            if row["activity_id"] and row["execution_score_checked_at"]
+        }
+        planned_dates = {date.fromisoformat(str(workout["date"])) for workout in plan.config.get("workouts", [])}
+        activities, score_errors = FitAnalyzer().enrich_execution_scores(
+            activities,
+            planned_dates,
+            checked_activity_ids,
+            connection,
+        )
         progress = self.state.refresh_progress(plan.id, activities, today=self.today)
-        self.state.record_event("progress-refreshed", {"plan_id": plan.id, "activity_count": len(activities)})
+        self.state.record_event(
+            "progress-refreshed",
+            {
+                "plan_id": plan.id,
+                "activity_count": len(activities),
+                "execution_score_errors": score_errors,
+            },
+        )
         return progress
 
     def generate_plan(self):

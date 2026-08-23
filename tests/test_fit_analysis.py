@@ -1,7 +1,12 @@
 import json
 from pathlib import Path
 
+from garminworkouts.activities import ActivitySummary
 from garminworkouts.fit_analysis import FitActivityMetrics, FitAnalyzer
+
+
+def _fit_payload():
+    return b"\x0e\x10\x00\x00\x00\x00\x00\x00.FIT\x00"
 
 
 def test_fit_analyzer_derives_session_metrics_and_decoupling(monkeypatch, tmp_path):
@@ -35,6 +40,100 @@ def test_fit_analyzer_derives_session_metrics_and_decoupling(monkeypatch, tmp_pa
     assert result.record_count == 20
     assert result.lap_count == 2
     assert result.pace_hr_decoupling_percent is not None
+
+
+def test_fit_analyzer_reads_undocumented_garmin_execution_score(monkeypatch):
+    analyzer = FitAnalyzer()
+    monkeypatch.setattr(analyzer, "decode_payload", lambda payload: {"session_mesgs": [{185: 87}]})
+
+    score = analyzer.execution_score_from_original(_fit_payload())
+
+    assert score == 87
+
+
+def test_execution_score_enrichment_downloads_each_completed_activity_once(monkeypatch):
+    activity = ActivitySummary.from_garmin(
+        {
+            "activityId": 42,
+            "activityName": "Structured run",
+            "startTimeLocal": "2026-08-20T09:30:00",
+            "activityType": {"typeKey": "running"},
+        }
+    )
+
+    class Connection:
+        def __init__(self):
+            self.downloaded = []
+
+        def download_activity_original(self, activity_id):
+            self.downloaded.append(activity_id)
+            return _fit_payload()
+
+    connection = Connection()
+    analyzer = FitAnalyzer()
+    monkeypatch.setattr(analyzer, "execution_score_from_original", lambda payload: 93)
+
+    enriched, errors = analyzer.enrich_execution_scores(
+        [activity],
+        {activity.date},
+        set(),
+        connection,
+    )
+    cached, cached_errors = analyzer.enrich_execution_scores(
+        [activity],
+        {activity.date},
+        {activity.activity_id},
+        connection,
+    )
+
+    assert errors == []
+    assert enriched[0].execution_score == 93
+    assert enriched[0].execution_score_checked is True
+    assert cached == [activity]
+    assert cached_errors == []
+    assert connection.downloaded == ["42"]
+
+
+def test_execution_score_enrichment_uses_same_day_match_as_progress(monkeypatch):
+    first = ActivitySummary.from_garmin(
+        {
+            "activityId": 1,
+            "activityName": "Morning run",
+            "startTimeLocal": "2026-08-20T08:00:00",
+            "activityType": {"typeKey": "running"},
+        }
+    )
+    second = ActivitySummary.from_garmin(
+        {
+            "activityId": 2,
+            "activityName": "Evening run",
+            "startTimeLocal": "2026-08-20T18:00:00",
+            "activityType": {"typeKey": "running"},
+        }
+    )
+
+    class Connection:
+        def __init__(self):
+            self.downloaded = []
+
+        def download_activity_original(self, activity_id):
+            self.downloaded.append(activity_id)
+            return _fit_payload()
+
+    connection = Connection()
+    analyzer = FitAnalyzer()
+    monkeypatch.setattr(analyzer, "execution_score_from_original", lambda payload: 80)
+
+    enriched, errors = analyzer.enrich_execution_scores(
+        [second, first],
+        {first.date},
+        set(),
+        connection,
+    )
+
+    assert errors == []
+    assert connection.downloaded == ["1"]
+    assert [activity.execution_score for activity in enriched] == [None, 80]
 
 
 def test_manifest_analysis_records_success_and_failure(monkeypatch, tmp_path):

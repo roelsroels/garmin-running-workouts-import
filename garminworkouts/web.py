@@ -264,6 +264,15 @@ def create_app(config=None):
                 inferred_missed = status == "scheduled" and workout_date < today_value
                 if inferred_missed:
                     status = "missed"
+                execution_score = row.get("execution_score")
+                if execution_score is None:
+                    execution_score_band = "unavailable"
+                elif execution_score >= 67:
+                    execution_score_band = "good"
+                elif execution_score >= 34:
+                    execution_score_band = "average"
+                else:
+                    execution_score_band = "low"
                 rows.append(
                     {
                         **workout,
@@ -271,6 +280,9 @@ def create_app(config=None):
                         "status": status,
                         "status_label": "Missed · needs refresh" if inferred_missed else status,
                         "inferred_missed": inferred_missed,
+                        "execution_score": execution_score,
+                        "execution_score_checked": bool(row.get("execution_score_checked_at")),
+                        "execution_score_band": execution_score_band,
                     }
                 )
         return render_template("calendar.html", plan=plan, rows=rows, today=today)

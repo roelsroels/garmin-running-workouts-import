@@ -7,7 +7,7 @@ from pathlib import Path
 
 from garminworkouts.models.heart_rate import HeartRateRange, validate_heart_rate_zone
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 HEART_RATE_PHASES = {"warmup", "easy", "long", "quality", "recovery"}
 
@@ -223,6 +223,8 @@ class AppState:
                 workout_name TEXT NOT NULL,
                 status TEXT NOT NULL,
                 activity_id TEXT,
+                execution_score REAL,
+                execution_score_checked_at TEXT,
                 updated_at TEXT NOT NULL,
                 PRIMARY KEY(plan_id, workout_date, workout_name),
                 FOREIGN KEY(plan_id) REFERENCES plans(id)
@@ -235,6 +237,13 @@ class AppState:
             );
             """
         )
+        progress_columns = {
+            row["name"] for row in self.connection.execute("PRAGMA table_info(plan_progress)").fetchall()
+        }
+        if "execution_score" not in progress_columns:
+            self.connection.execute("ALTER TABLE plan_progress ADD COLUMN execution_score REAL")
+        if "execution_score_checked_at" not in progress_columns:
+            self.connection.execute("ALTER TABLE plan_progress ADD COLUMN execution_score_checked_at TEXT")
         self.set_setting("schema_version", str(SCHEMA_VERSION))
         self.connection.commit()
 
@@ -361,7 +370,10 @@ class AppState:
         for activity in sorted(activities, key=lambda item: item.started_at):
             activities_by_date.setdefault(activity.date.isoformat(), activity)
         rows = self.connection.execute(
-            "SELECT workout_date, workout_name FROM plan_progress WHERE plan_id = ? ORDER BY workout_date",
+            """
+            SELECT workout_date, workout_name, activity_id, execution_score, execution_score_checked_at
+            FROM plan_progress WHERE plan_id = ? ORDER BY workout_date
+            """,
             (plan_id,),
         ).fetchall()
         now = _now()
@@ -372,25 +384,54 @@ class AppState:
                 if activity:
                     status = "completed"
                     activity_id = activity.activity_id
+                    same_activity = row["activity_id"] == activity_id
+                    execution_score = (
+                        activity.execution_score
+                        if activity.execution_score is not None
+                        else row["execution_score"]
+                        if same_activity
+                        else None
+                    )
+                    execution_score_checked_at = (
+                        now
+                        if activity.execution_score_checked
+                        else row["execution_score_checked_at"]
+                        if same_activity
+                        else None
+                    )
                 elif workout_date < today:
                     status = "missed"
                     activity_id = None
+                    execution_score = None
+                    execution_score_checked_at = None
                 else:
                     status = "scheduled"
                     activity_id = None
+                    execution_score = None
+                    execution_score_checked_at = None
                 self.connection.execute(
                     """
-                    UPDATE plan_progress SET status = ?, activity_id = ?, updated_at = ?
+                    UPDATE plan_progress
+                    SET status = ?, activity_id = ?, execution_score = ?, execution_score_checked_at = ?, updated_at = ?
                     WHERE plan_id = ? AND workout_date = ? AND workout_name = ?
                     """,
-                    (status, activity_id, now, plan_id, row["workout_date"], row["workout_name"]),
+                    (
+                        status,
+                        activity_id,
+                        execution_score,
+                        execution_score_checked_at,
+                        now,
+                        plan_id,
+                        row["workout_date"],
+                        row["workout_name"],
+                    ),
                 )
         return self.progress(plan_id)
 
     def progress(self, plan_id):
         rows = self.connection.execute(
             """
-            SELECT workout_date, workout_name, status, activity_id
+            SELECT workout_date, workout_name, status, activity_id, execution_score, execution_score_checked_at
             FROM plan_progress WHERE plan_id = ? ORDER BY workout_date, workout_name
             """,
             (plan_id,),

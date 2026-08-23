@@ -2,7 +2,7 @@ import json
 import math
 import os
 import statistics
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from pathlib import Path
 
@@ -63,6 +63,61 @@ class FitAnalyzer:
         if fatal and not messages:
             raise ValueError(f"Unable to decode FIT file '{path}': {'; '.join(fatal)}")
         return messages, fatal
+
+    def decode_payload(self, payload):
+        try:
+            from garmin_fit_sdk import Decoder, Stream
+        except ImportError as exc:
+            raise RuntimeError("FIT analysis requires the 'garmin-fit-sdk' package") from exc
+
+        stream = Stream.from_byte_array(bytearray(payload))
+        decoder = Decoder(stream)
+        messages, errors = decoder.read()
+        fatal = [str(error) for error in errors if error]
+        if fatal and not messages:
+            raise ValueError(f"Unable to decode downloaded FIT activity: {'; '.join(fatal)}")
+        return messages
+
+    def execution_score_from_original(self, original):
+        from garminworkouts.activities import ActivityArchive
+
+        for payload in ActivityArchive._fit_payloads(original):
+            messages = self.decode_payload(payload)
+            sessions = messages.get("session_mesgs") or []
+            laps = messages.get("lap_mesgs") or []
+            for message, field_number in [*((session, 185) for session in sessions), *((lap, 152) for lap in laps)]:
+                score = _number(_message_value(message, "execution_score", field_number))
+                if score is not None and 0 <= score <= 100:
+                    return int(score) if score.is_integer() else round(score, 1)
+        return None
+
+    def enrich_execution_scores(self, activities, planned_dates, checked_activity_ids, connection):
+        enriched = []
+        errors = []
+        stop_downloading = False
+        matched_activity_ids = {}
+        for activity in sorted(activities, key=lambda item: item.started_at):
+            if activity.date in planned_dates:
+                matched_activity_ids.setdefault(activity.date, activity.activity_id)
+        for activity in activities:
+            already_checked = activity.execution_score_checked or activity.activity_id in checked_activity_ids
+            is_matched_activity = matched_activity_ids.get(activity.date) == activity.activity_id
+            if not is_matched_activity or already_checked or stop_downloading:
+                enriched.append(activity)
+                continue
+            try:
+                original = connection.download_activity_original(activity.activity_id)
+                score = self.execution_score_from_original(original)
+            except ValueError as exc:
+                errors.append({"activity_id": activity.activity_id, "error": str(exc)})
+                enriched.append(replace(activity, execution_score_checked=True))
+            except Exception as exc:
+                errors.append({"activity_id": activity.activity_id, "error": str(exc)})
+                enriched.append(activity)
+                stop_downloading = True
+            else:
+                enriched.append(replace(activity, execution_score=score, execution_score_checked=True))
+        return enriched, errors
 
     def analyze_file(self, path):
         path = Path(path)
