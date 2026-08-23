@@ -188,7 +188,11 @@ def create_app(config=None):
             llm_enabled = state.get_setting("llm_provider", "none") != "none"
             old_record = state.plan(record.supersedes_plan_id) if record.supersedes_plan_id else None
             changes = (
-                PlannerWorkflow.calendar_changes(old_record.config, record.config)
+                PlannerWorkflow.calendar_changes(
+                    old_record.config,
+                    record.config,
+                    progress=state.progress(old_record.id),
+                )
                 if old_record
                 else [f"{item['date']}: add {item['name']}" for item in record.config.get("workouts", [])]
             )

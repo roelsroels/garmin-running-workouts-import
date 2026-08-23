@@ -111,15 +111,22 @@ class ScheduledConflictCleanup:
 
 
 class PlanRetirement:
-    def __init__(self, plan, connection, protected_plans=None, today=None):
+    def __init__(self, plan, connection, protected_plans=None, today=None, immutable_workouts=None):
         self.plan = plan
         self.connection = connection
         self.protected_plans = protected_plans or []
         self.today = today or date.today()
+        self.immutable_workouts = set(immutable_workouts or ())
 
     def preview(self):
         plan_entries = self.plan.entries
         target_names = {entry["workout"].get_workout_name() for entry in plan_entries}
+        immutable_names = {
+            entry["workout"].get_workout_name()
+            for entry in plan_entries
+            if entry["date"] < self.today
+            or (entry["date"].isoformat(), entry["workout"].get_workout_name()) in self.immutable_workouts
+        }
         protected_names, protected_calendar_keys = self._protected_keys()
         existing_by_name = self._existing_workouts_by_name(target_names)
 
@@ -132,7 +139,12 @@ class PlanRetirement:
                 continue
             workout_id = RunningWorkout.extract_workout_id(existing)
             workout_ids_by_name[name] = str(workout_id)
-            action = "retain-protected" if name in protected_names else "delete"
+            if name in protected_names:
+                action = "retain-protected"
+            elif name in immutable_names:
+                action = "retain-immutable"
+            else:
+                action = "delete"
             workouts.append({"name": name, "workout_id": workout_id, "action": action})
 
         scheduled_items = self._scheduled_items_for_plan_months()
@@ -176,6 +188,8 @@ class PlanRetirement:
                     action = "retain-protected"
                 elif entry["date"] < self.today:
                     action = "retain-past"
+                elif calendar_key in self.immutable_workouts:
+                    action = "retain-immutable"
                 elif match["scheduled_workout_id"] is None:
                     action = "unresolved-schedule-id"
                 else:
@@ -203,8 +217,10 @@ class PlanRetirement:
             "summary": {
                 "future_calendar_entries_to_unschedule": sum(item["action"] == "unschedule" for item in calendar),
                 "past_calendar_entries_retained": sum(item["action"] == "retain-past" for item in calendar),
+                "immutable_calendar_entries_retained": sum(item["action"] == "retain-immutable" for item in calendar),
                 "workout_templates_to_delete": sum(item["action"] == "delete" for item in workouts),
                 "protected_workout_templates": sum(item["action"] == "retain-protected" for item in workouts),
+                "immutable_workout_templates": sum(item["action"] == "retain-immutable" for item in workouts),
                 "missing_workout_templates": sum(item["action"] == "missing" for item in workouts),
             },
             "calendar": calendar,

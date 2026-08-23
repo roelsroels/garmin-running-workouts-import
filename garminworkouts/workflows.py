@@ -12,6 +12,7 @@ from garminworkouts.llm import LLMConfig, OpenAICompatibleAdvisor
 from garminworkouts.models.training_plan import TrainingPlan
 from garminworkouts.plan import PlanApplier
 from garminworkouts.planner import DeterministicPlanner, write_plan
+from garminworkouts.replanning import calendar_changes, immutable_workout_keys
 from garminworkouts.retire import PlanRetirement, ScheduledConflictCleanup
 
 
@@ -128,6 +129,7 @@ class PlannerWorkflow:
             raise ValueError("An active goal and plan are required")
         with self.garmin_client() as connection:
             self.refresh(connection=connection)
+            progress_rows = self.state.block_progress(active_plan.id)
             progress = self.state.block_progress_summary(active_plan.id)
             if progress["completed"] < 2:
                 raise ValueError(
@@ -141,8 +143,14 @@ class PlannerWorkflow:
             activities,
             today=self.today,
             fit_analysis=fit_analysis,
+            progress=progress_rows,
         )
-        changes = self.calendar_changes(active_plan.config, proposal.config, today=self.today)
+        changes = self.calendar_changes(
+            active_plan.config,
+            proposal.config,
+            today=self.today,
+            progress=progress_rows,
+        )
         if not changes:
             self.state.record_event("adaptation-retained", {"plan_id": active_plan.id})
             return None, []
@@ -180,6 +188,7 @@ class PlannerWorkflow:
                         connection,
                         protected_plans=[new_plan],
                         today=self.today,
+                        immutable_workouts=immutable_workout_keys(self.state.progress(old_record.id)),
                     )
                     retirement_actions = retirement.apply(retirement.preview())
         except GarminRateLimitError:
@@ -225,7 +234,14 @@ class PlannerWorkflow:
             "confidence": record.confidence,
             "rationale": list(record.rationale),
             "calendar_changes": (
-                self.calendar_changes(old_record.config, record.config, today=self.today) if old_record else []
+                self.calendar_changes(
+                    old_record.config,
+                    record.config,
+                    today=self.today,
+                    progress=self.state.progress(old_record.id),
+                )
+                if old_record
+                else []
             ),
         }
         explanation = OpenAICompatibleAdvisor(config, api_key).explain(assessment)
@@ -355,22 +371,8 @@ class PlannerWorkflow:
         return self.state.plans_dir / f"{start}-{slug}.yaml"
 
     @staticmethod
-    def calendar_changes(old_config, new_config, today=None):
-        today = today or date.today()
-        old = {str(item["date"]): item for item in old_config.get("workouts", [])}
-        new = {str(item["date"]): item for item in new_config.get("workouts", [])}
-        changes = []
-        for item in new.values():
-            previous = old.get(str(item["date"]))
-            if previous is None:
-                changes.append(f"{item['date']}: add {item['name']}")
-            elif previous.get("steps") != item.get("steps") or previous.get("description") != item.get("description"):
-                changes.append(f"{item['date']}: {previous['name']} → {item['name']}")
-        for item in old.values():
-            item_date = date.fromisoformat(str(item["date"]))
-            if item_date >= today and str(item["date"]) not in new:
-                changes.append(f"{item['date']}: remove {item['name']}")
-        return changes
+    def calendar_changes(old_config, new_config, today=None, progress=None):
+        return calendar_changes(old_config, new_config, today=today, progress=progress)
 
     @staticmethod
     def _validate_conflict_choice(preview, remove_conflicts, delete_templates, allow_duplicates):

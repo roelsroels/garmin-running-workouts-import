@@ -7,7 +7,9 @@ from pathlib import Path
 
 import yaml
 
-ENGINE_VERSION = 2
+from garminworkouts.replanning import normalized_easy_minutes, progress_statuses, workout_status
+
+ENGINE_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -110,8 +112,10 @@ class DeterministicPlanner:
         elif baseline.longest_run_km:
             rationale.append(f"Long-run construction is anchored to the recent {long_run_km:.1f} km maximum.")
 
-        easy_minutes = round(baseline.median_duration_minutes or 35)
-        easy_minutes = max(20, min(easy_minutes, goal.max_session_minutes, 60))
+        easy_minutes = normalized_easy_minutes(
+            baseline.median_duration_minutes or 35,
+            min(goal.max_session_minutes, 60),
+        )
         if baseline.confidence == "insufficient":
             rationale.append(
                 "History is insufficient for narrow targets; the proposal emphasizes familiar easy running."
@@ -146,21 +150,26 @@ class DeterministicPlanner:
         }
         return PlanProposal(config, baseline, confidence, tuple(rationale))
 
-    def adapt_remaining(self, goal, active_plan, activities, today=None, fit_analysis=None):
+    def adapt_remaining(self, goal, active_plan, activities, today=None, fit_analysis=None, progress=None):
         today = today or date.today()
         baseline = assess_baseline(activities)
         selected_days, actual_frequency, frequency_rationale = self._selected_days(goal, baseline)
+        statuses = progress_statuses(progress)
+        active_workouts = active_plan.config.get("workouts", [])
         remaining_dates = sorted(
             date.fromisoformat(str(item["date"]))
-            for item in active_plan.config.get("workouts", [])
+            for item in active_workouts
             if date.fromisoformat(str(item["date"])) >= today
             and date.fromisoformat(str(item["date"])).weekday() in selected_days
+            and workout_status(item, statuses, today) == "scheduled"
         )
         if not remaining_dates:
-            raise ValueError("The active plan has no remaining scheduled days to adapt")
+            raise ValueError("The active plan has no upcoming mutable workouts to adapt")
 
-        easy_minutes = round(baseline.median_duration_minutes or 35)
-        easy_minutes = max(20, min(easy_minutes, goal.max_session_minutes, 60))
+        easy_minutes = normalized_easy_minutes(
+            baseline.median_duration_minutes or 35,
+            min(goal.max_session_minutes, 60),
+        )
         long_run_km = baseline.longest_run_km or goal.baseline_long_run_km or min(goal.target_distance_km or 6.0, 6.0)
         quality_day = self._quality_day(selected_days, goal.long_run_day, goal.goal_type, actual_frequency)
 
@@ -202,11 +211,24 @@ class DeterministicPlanner:
                         f"{len(decoupling)} run(s), not as a standalone progression rule."
                     )
 
+        if progress is None:
+            completed_count = sum(workout_status(item, statuses, today) == "completed" for item in active_workouts)
+            missed_count = sum(
+                date.fromisoformat(str(item["date"])) < today and workout_status(item, statuses, today) == "missed"
+                for item in active_workouts
+            )
+        else:
+            completed_count = sum(status == "completed" for status in statuses.values())
+            missed_count = sum(
+                date.fromisoformat(workout_date) < today and status == "missed"
+                for (workout_date, _), status in statuses.items()
+            )
         rationale = [
             *frequency_rationale,
             f"Reassessed {baseline.run_count} recent runs and rebuilt only {len(workouts)} remaining scheduled days.",
             *fit_rationale,
-            "Completed plan dates are excluded from the replacement proposal.",
+            f"Kept {completed_count} completed workout(s) immutable and used them only as planning evidence.",
+            f"Left {missed_count} missed past workout(s) in history; they are not moved or rescheduled automatically.",
         ]
         config = {
             "name": f"{today.isoformat()} adapted {goal.goal_type.replace('_', ' ')} block",
@@ -264,7 +286,7 @@ class DeterministicPlanner:
         return candidates[0] if candidates else None
 
     def _easy_workout(self, workout_date, week_index, easy_minutes, goal=None):
-        duration = easy_minutes if week_index < 3 else max(20, round(easy_minutes * 0.85))
+        duration = easy_minutes if week_index < 3 else normalized_easy_minutes(easy_minutes * 0.85, easy_minutes)
         steps = [
             self._heart_rate_step(goal, "warmup", {"type": "warmup", "duration": "5:00"}),
             self._heart_rate_step(

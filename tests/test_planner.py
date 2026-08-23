@@ -1,8 +1,11 @@
 from datetime import date, datetime, timedelta
 
+import pytest
+
 from garminworkouts.activities import ActivitySummary
 from garminworkouts.models.training_plan import TrainingPlan
 from garminworkouts.planner import DeterministicPlanner, assess_baseline
+from garminworkouts.replanning import nearest_five_minutes
 from garminworkouts.state import Goal, PlanRecord
 
 
@@ -53,6 +56,32 @@ def test_baseline_assigns_confidence_from_history():
     assert baseline.confidence == "high"
     assert baseline.longest_run_km == 8
     assert baseline.run_count == 18
+
+
+@pytest.mark.parametrize(
+    ("minutes", "expected"),
+    [(41, 40), (42, 40), (43, 45), (47, 45), (48, 50)],
+)
+def test_duration_normalization_rounds_to_nearest_five(minutes, expected):
+    assert nearest_five_minutes(minutes) == expected
+
+
+@pytest.mark.parametrize(("minutes", "expected"), [(41, 40), (43, 45), (48, 50)])
+def test_generated_easy_workouts_use_normalized_duration(minutes, expected):
+    activity = ActivitySummary(
+        "duration-baseline",
+        "Run",
+        datetime(2030, 1, 1),
+        "running",
+        distance_m=6000,
+        duration_s=minutes * 60,
+    )
+
+    proposal = DeterministicPlanner().generate(_goal(), [activity])
+    easy = next(item for item in proposal.config["workouts"] if date.fromisoformat(item["date"]).weekday() == 3)
+
+    assert f"Easy{expected}" in easy["name"]
+    assert easy["description"].startswith(f"{expected} min easy")
 
 
 def test_distance_plan_progresses_long_run_without_progressing_quality():
@@ -160,6 +189,47 @@ def test_adaptation_contains_only_remaining_dates_and_fit_evidence(tmp_path):
 
     assert all(date.fromisoformat(item["date"]) >= date(2030, 1, 20) for item in proposal.config["workouts"])
     assert "Decoded 1 original FIT" in " ".join(proposal.rationale)
+
+
+def test_adaptation_keeps_completed_workouts_immutable_and_missed_workouts_historical(tmp_path):
+    original = DeterministicPlanner().generate(_goal(), _activities())
+    record = PlanRecord(
+        id=7,
+        goal_id=1,
+        name="Old",
+        start_date=date.fromisoformat(original.config["workouts"][0]["date"]),
+        end_date=date.fromisoformat(original.config["workouts"][-1]["date"]),
+        path=tmp_path / "old.yaml",
+        config=original.config,
+        status="active",
+        confidence="high",
+        rationale=(),
+        created_at="now",
+    )
+    today = date(2030, 1, 20)
+    future = [item for item in original.config["workouts"] if date.fromisoformat(item["date"]) >= today]
+    completed_future = future[0]
+    missed_past = next(item for item in original.config["workouts"] if date.fromisoformat(item["date"]) < today)
+    progress = [
+        {
+            "workout_date": completed_future["date"],
+            "workout_name": completed_future["name"],
+            "status": "completed",
+        },
+        {
+            "workout_date": missed_past["date"],
+            "workout_name": missed_past["name"],
+            "status": "missed",
+        },
+    ]
+
+    proposal = DeterministicPlanner().adapt_remaining(_goal(), record, _activities(), today=today, progress=progress)
+
+    proposed_dates = {item["date"] for item in proposal.config["workouts"]}
+    assert completed_future["date"] not in proposed_dates
+    assert all(date.fromisoformat(item) >= today for item in proposed_dates)
+    assert any(reason.startswith("Kept 1 completed workout(s) immutable") for reason in proposal.rationale)
+    assert any(reason.startswith("Left 1 missed past workout(s) in history") for reason in proposal.rationale)
 
 
 def test_adaptation_preserves_original_week_numbers_when_evidence_is_unchanged(tmp_path):

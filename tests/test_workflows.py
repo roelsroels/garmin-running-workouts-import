@@ -68,3 +68,62 @@ def test_workflow_calendar_changes_keeps_elapsed_dates_out_of_removals():
     changes = PlannerWorkflow.calendar_changes(old, new, today=date(2030, 1, 5))
 
     assert changes == ["2030-01-10: Old → New"]
+
+
+def test_workflow_calendar_changes_only_removes_upcoming_mutable_workouts():
+    old = {
+        "workouts": [
+            {"date": "2030-01-01", "name": "Missed", "steps": []},
+            {"date": "2030-01-10", "name": "Completed early", "steps": []},
+            {"date": "2030-01-12", "name": "Mutable", "steps": []},
+        ]
+    }
+    progress = [
+        {"workout_date": "2030-01-01", "workout_name": "Missed", "status": "missed"},
+        {"workout_date": "2030-01-10", "workout_name": "Completed early", "status": "completed"},
+        {"workout_date": "2030-01-12", "workout_name": "Mutable", "status": "scheduled"},
+    ]
+
+    changes = PlannerWorkflow.calendar_changes(
+        old,
+        {"workouts": []},
+        today=date(2030, 1, 5),
+        progress=progress,
+    )
+
+    assert changes == ["2030-01-12: remove Mutable"]
+
+
+def test_workflow_calendar_changes_suppresses_nearest_five_rounding_no_op():
+    old = {
+        "workouts": [
+            {
+                "date": "2030-01-10",
+                "sport": "running",
+                "name": "300110 Easy41 HR",
+                "description": "41 min easy; conversational",
+                "steps": [
+                    {"type": "warmup", "duration": "5:00"},
+                    {"type": "interval", "duration": "31:00", "heart_rate_max": 140},
+                    {"type": "cooldown", "duration": "5:00"},
+                ],
+            }
+        ]
+    }
+    new = {
+        "workouts": [
+            {
+                "date": "2030-01-10",
+                "sport": "running",
+                "name": "300110 Easy40 HR",
+                "description": "40 min easy; conversational",
+                "steps": [
+                    {"type": "warmup", "duration": "5:00"},
+                    {"type": "interval", "duration": "30:00", "heart_rate_max": 140},
+                    {"type": "cooldown", "duration": "5:00"},
+                ],
+            }
+        ]
+    }
+
+    assert PlannerWorkflow.calendar_changes(old, new, today=date(2030, 1, 5)) == []

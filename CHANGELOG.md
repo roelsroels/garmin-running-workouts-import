@@ -5,6 +5,11 @@ All notable changes to Garmin Running Workouts Import are documented here. The p
 
 ## [Unreleased]
 
+- Replanning now treats completed workouts as immutable planning evidence, limits proposals and Garmin changes to
+  upcoming scheduled workouts, and leaves missed past workouts in history instead of moving them automatically.
+- Duration-based easy workouts are normalized to the nearest five minutes, and normalized comparisons suppress
+  rounding-only calendar changes.
+
 ## [1.1.0] - 2026-08-23
 
 Calendar feedback and completed-workout evidence are now more informative while remaining conservative with Garmin requests.

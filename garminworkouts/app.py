@@ -16,6 +16,7 @@ from garminworkouts.models.heart_rate import HeartRateRange, validate_heart_rate
 from garminworkouts.models.training_plan import TrainingPlan
 from garminworkouts.plan import PlanApplier
 from garminworkouts.planner import DeterministicPlanner, write_plan
+from garminworkouts.replanning import calendar_changes, immutable_workout_keys
 from garminworkouts.retire import PlanRetirement, ScheduledConflictCleanup
 from garminworkouts.state import Goal
 
@@ -267,6 +268,7 @@ class InteractiveApp:
             raise ValueError("An active goal and plan are required")
         with self._garmin_client() as connection:
             self.refresh(silent=True, connection=connection)
+            progress_rows = self.state.block_progress(active_plan.id)
             progress = self.state.block_progress_summary(active_plan.id)
             if progress["completed"] < 2:
                 self.console.write(
@@ -282,8 +284,14 @@ class InteractiveApp:
             activities,
             today=self.today,
             fit_analysis=fit_analysis,
+            progress=progress_rows,
         )
-        changes = self._calendar_changes(active_plan.config, proposal.config, today=self.today)
+        changes = self._calendar_changes(
+            active_plan.config,
+            proposal.config,
+            today=self.today,
+            progress=progress_rows,
+        )
         if not changes:
             self.console.write("The new evidence does not justify changing any remaining workouts.")
             self.state.record_event("adaptation-retained", {"plan_id": active_plan.id})
@@ -697,7 +705,13 @@ class InteractiveApp:
                 retirement_actions = []
                 if old_record:
                     old_plan = TrainingPlan(old_record.config)
-                    retirement = PlanRetirement(old_plan, connection, protected_plans=[new_plan], today=self.today)
+                    retirement = PlanRetirement(
+                        old_plan,
+                        connection,
+                        protected_plans=[new_plan],
+                        today=self.today,
+                        immutable_workouts=immutable_workout_keys(self.state.progress(old_record.id)),
+                    )
                     retirement_preview = retirement.preview()
                     retirement_actions = retirement.apply(retirement_preview)
         except GarminRateLimitError:
@@ -826,22 +840,8 @@ class InteractiveApp:
         return self.state.plans_dir / f"{start}-{slug}.yaml"
 
     @staticmethod
-    def _calendar_changes(old_config, new_config, today=None):
-        today = today or date.today()
-        old = {str(item["date"]): item for item in old_config.get("workouts", [])}
-        new = {str(item["date"]): item for item in new_config.get("workouts", [])}
-        changes = []
-        for item in new.values():
-            previous = old.get(str(item["date"]))
-            if previous is None:
-                changes.append(f"{item['date']}: add {item['name']}")
-            elif previous.get("steps") != item.get("steps") or previous.get("description") != item.get("description"):
-                changes.append(f"{item['date']}: {previous['name']} → {item['name']}")
-        for item in old.values():
-            item_date = date.fromisoformat(str(item["date"]))
-            if item_date >= today and str(item["date"]) not in new:
-                changes.append(f"{item['date']}: remove {item['name']}")
-        return changes
+    def _calendar_changes(old_config, new_config, today=None, progress=None):
+        return calendar_changes(old_config, new_config, today=today, progress=progress)
 
     @staticmethod
     def _goal_summary(goal):

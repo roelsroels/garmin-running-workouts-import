@@ -61,7 +61,7 @@ class FakeConnection:
         self.deleted.append(workout_id)
 
 
-def test_preview_and_apply_retains_past_unschedules_future_then_deletes_templates():
+def test_preview_and_apply_retains_past_workout_and_template_then_retires_future():
     plan = _plan([("2026-08-06", "260806 Easy"), ("2026-08-13", "260813 Quality")])
     connection = FakeConnection(
         workouts=[_workout(101, "260806 Easy"), _workout(102, "260813 Quality")],
@@ -81,17 +81,49 @@ def test_preview_and_apply_retains_past_unschedules_future_then_deletes_template
     assert preview["summary"] == {
         "future_calendar_entries_to_unschedule": 1,
         "past_calendar_entries_retained": 1,
-        "workout_templates_to_delete": 2,
+        "immutable_calendar_entries_retained": 0,
+        "workout_templates_to_delete": 1,
         "protected_workout_templates": 0,
+        "immutable_workout_templates": 1,
         "missing_workout_templates": 0,
     }
     assert connection.unscheduled == [202]
-    assert connection.deleted == [101, 102]
+    assert connection.deleted == [102]
     assert [action["action"] for action in actions] == [
         "unscheduled",
         "deleted-workout-template",
-        "deleted-workout-template",
     ]
+
+
+def test_retirement_keeps_future_completed_workout_immutable():
+    plan = _plan([("2026-08-13", "Completed early"), ("2026-08-16", "Mutable")])
+    connection = FakeConnection(
+        workouts=[_workout(101, "Completed early"), _workout(102, "Mutable")],
+        scheduled={
+            "calendarItems": [
+                {"id": 201, "workoutId": 101, "date": "2026-08-13"},
+                {"id": 202, "workoutId": 102, "date": "2026-08-16"},
+            ]
+        },
+    )
+    retirement = PlanRetirement(
+        plan,
+        connection,
+        today=date(2026, 8, 10),
+        immutable_workouts={("2026-08-13", "Completed early")},
+    )
+
+    preview = retirement.preview()
+    retirement.apply(preview)
+
+    assert next(item for item in preview["calendar"] if item["name"] == "Completed early")["action"] == (
+        "retain-immutable"
+    )
+    assert next(item for item in preview["workouts"] if item["name"] == "Completed early")["action"] == (
+        "retain-immutable"
+    )
+    assert connection.unscheduled == [202]
+    assert connection.deleted == [102]
 
 
 def test_protected_plan_retains_reused_template_and_calendar_entry():
