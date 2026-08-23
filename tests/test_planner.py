@@ -96,6 +96,25 @@ def test_distance_plan_progresses_long_run_without_progressing_quality():
     assert [item["name"].split()[-1] for item in quality] == ["4x3", "4x3", "4x3", "3x3"]
 
 
+def test_long_run_progression_does_not_regress_below_demonstrated_distance():
+    activities = [
+        *_activities(),
+        ActivitySummary(
+            "recent-12k",
+            "12 km run",
+            datetime(2030, 1, 7),
+            "running",
+            distance_m=12000,
+            duration_s=75 * 60,
+        ),
+    ]
+
+    proposal = DeterministicPlanner().generate(_goal(), activities)
+    long_runs = [item for item in proposal.config["workouts"] if "Long" in item["name"]]
+
+    assert [item["steps"][0]["distance"] for item in long_runs] == ["12km", "12km", "12km", "10km"]
+
+
 def test_target_time_plan_uses_goal_pace_and_extends_quality_duration():
     proposal = DeterministicPlanner().generate(_goal("target_time"), _activities())
     quality = [item for item in proposal.config["workouts"] if " Q " in item["name"]]
@@ -230,6 +249,50 @@ def test_adaptation_keeps_completed_workouts_immutable_and_missed_workouts_histo
     assert all(date.fromisoformat(item) >= today for item in proposed_dates)
     assert any(reason.startswith("Kept 1 completed workout(s) immutable") for reason in proposal.rationale)
     assert any(reason.startswith("Left 1 missed past workout(s) in history") for reason in proposal.rationale)
+
+
+def test_adaptation_uses_completed_12k_as_evidence_for_remaining_reduced_week(tmp_path):
+    original = DeterministicPlanner().generate(_goal(), _activities())
+    record = PlanRecord(
+        id=7,
+        goal_id=1,
+        name="Old",
+        start_date=date.fromisoformat(original.config["workouts"][0]["date"]),
+        end_date=date.fromisoformat(original.config["workouts"][-1]["date"]),
+        path=tmp_path / "old.yaml",
+        config=original.config,
+        status="active",
+        confidence="high",
+        rationale=(),
+        created_at="now",
+    )
+    today = date(2030, 1, 27)
+    today_workout = next(item for item in original.config["workouts"] if item["date"] == today.isoformat())
+    progress = [
+        {
+            "workout_date": today_workout["date"],
+            "workout_name": today_workout["name"],
+            "status": "completed",
+        }
+    ]
+    activities = [
+        *_activities(),
+        ActivitySummary(
+            "completed-12k",
+            "12 km completed run",
+            datetime.combine(today, datetime.min.time()),
+            "running",
+            distance_m=12000,
+            duration_s=75 * 60,
+        ),
+    ]
+
+    proposal = DeterministicPlanner().adapt_remaining(_goal(), record, activities, today=today, progress=progress)
+
+    assert today_workout["date"] not in {item["date"] for item in proposal.config["workouts"]}
+    remaining_long = next(item for item in proposal.config["workouts"] if "Long" in item["name"])
+    assert remaining_long["steps"][0]["distance"] == "10km"
+    assert any("recent 12.0 km maximum" in reason and "10km" in reason for reason in proposal.rationale)
 
 
 def test_adaptation_preserves_original_week_numbers_when_evidence_is_unchanged(tmp_path):

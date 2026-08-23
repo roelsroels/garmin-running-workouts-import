@@ -67,6 +67,36 @@ def calendar_changes(old_config, new_config, today=None, progress=None):
     return changes
 
 
+def mutable_replacement_workouts(old_config, new_config, today=None, progress=None):
+    today = today or date.today()
+    statuses = progress_statuses(progress)
+    old = {str(item["date"]): item for item in old_config.get("workouts", [])}
+    mutable = []
+    for item in new_config.get("workouts", []):
+        item_date = date.fromisoformat(str(item["date"]))
+        previous = old.get(str(item["date"]))
+        if item_date < today:
+            continue
+        if previous is not None and workout_status(previous, statuses, today) not in MUTABLE_WORKOUT_STATUSES:
+            continue
+        mutable.append(item)
+    return mutable
+
+
+def validate_mutable_replacement(old_config, new_config, today=None, progress=None):
+    workouts = list(new_config.get("workouts", []))
+    mutable = mutable_replacement_workouts(
+        old_config,
+        new_config,
+        today=today,
+        progress=progress,
+    )
+    if len(mutable) != len(workouts):
+        raise ValueError(
+            "This proposal contains past, completed, or missed workouts; regenerate it before inspecting or applying"
+        )
+
+
 def workouts_equivalent(first, second):
     first = _normalized_comparison(first)
     second = _normalized_comparison(second)

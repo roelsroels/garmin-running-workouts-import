@@ -12,7 +12,7 @@ from garminworkouts.llm import LLMConfig, OpenAICompatibleAdvisor
 from garminworkouts.models.training_plan import TrainingPlan
 from garminworkouts.plan import PlanApplier
 from garminworkouts.planner import DeterministicPlanner, write_plan
-from garminworkouts.replanning import calendar_changes, immutable_workout_keys
+from garminworkouts.replanning import calendar_changes, immutable_workout_keys, validate_mutable_replacement
 from garminworkouts.retire import PlanRetirement, ScheduledConflictCleanup
 
 
@@ -118,6 +118,8 @@ class PlannerWorkflow:
         goal = self.state.active_goal()
         if not goal:
             raise ValueError("Create a goal before generating a plan")
+        if self.state.active_plan():
+            raise ValueError("An active plan already exists; reassess its remaining workouts instead")
         activities = self.fetch_recent_history()
         proposal = self.planner.generate(goal, activities)
         return self._save_proposal(proposal, self.state.active_plan())
@@ -157,6 +159,7 @@ class PlannerWorkflow:
         return self._save_proposal(proposal, active_plan), changes
 
     def inspect_plan_conflicts(self, record):
+        self._validate_replacement(record)
         plan = TrainingPlan(record.config)
         with self.garmin_client() as connection:
             preview = ScheduledConflictCleanup(plan, connection, today=self.today).preview()
@@ -167,6 +170,7 @@ class PlannerWorkflow:
         return self._read_json(self._plan_conflict_path(plan_id))
 
     def apply_plan(self, record, preview, remove_conflicts, delete_templates, allow_duplicates):
+        self._validate_replacement(record)
         self._validate_conflict_choice(preview, remove_conflicts, delete_templates, allow_duplicates)
         new_plan = TrainingPlan(record.config)
         old_record = self.state.plan(record.supersedes_plan_id) if record.supersedes_plan_id else None
@@ -341,6 +345,15 @@ class PlannerWorkflow:
             proposal.confidence,
             proposal.rationale,
             supersedes_plan_id=old_record.id if old_record else None,
+        )
+
+    def _validate_replacement(self, record):
+        old_record = self.state.plan(record.supersedes_plan_id) if record.supersedes_plan_id else None
+        validate_mutable_replacement(
+            old_record.config if old_record else {"workouts": []},
+            record.config,
+            today=self.today,
+            progress=self.state.progress(old_record.id) if old_record else None,
         )
 
     def _prepare_fit_analysis(self, activities, connection):

@@ -199,9 +199,84 @@ def test_active_dashboard_calendar_cleanup_and_plan_review_render(tmp_path):
     review = client.get(f"/plans/{record.id}")
 
     assert b"Complete ten kilometres" in dashboard.data
+    assert b"Reassess remaining plan" in dashboard.data
+    assert b"Generate a new proposal" not in dashboard.data
     assert b"300110 Easy30" in calendar.data
     assert b"Inspect Garmin schedule" in cleanup.data
     assert b"A reviewable reason" in review.data
+
+
+def test_proposal_review_separates_calendar_history_from_five_upcoming_workouts(tmp_path):
+    app = _app(tmp_path)
+    today = date.today()
+
+    def workout(offset, name):
+        workout_date = today + timedelta(days=offset)
+        return {
+            "date": workout_date.isoformat(),
+            "sport": "running",
+            "name": name,
+            "description": "Controlled running",
+            "steps": [{"type": "interval", "duration": "30:00"}],
+        }
+
+    history_and_future = [
+        workout(-2, "Completed before today"),
+        workout(-1, "Missed before today"),
+        workout(0, "Completed 12 km today"),
+        *(workout(offset, f"Upcoming {offset}") for offset in range(1, 6)),
+    ]
+    old_config = {"name": "Active block", "metadata": {}, "workouts": history_and_future}
+    proposal_config = {
+        "name": "Remaining block",
+        "metadata": {},
+        "workouts": history_and_future[3:],
+    }
+    activities = [
+        ActivitySummary(
+            "completed-before",
+            "Completed before today",
+            datetime.combine(today - timedelta(days=2), datetime.min.time()),
+            "running",
+        ),
+        ActivitySummary(
+            "completed-today",
+            "Completed 12 km today",
+            datetime.combine(today, datetime.min.time()),
+            "running",
+            distance_m=12000,
+        ),
+    ]
+    with AppState(app.config["DATA_DIR"]) as state:
+        goal = state.save_goal(
+            Goal(
+                goal_type="complete_distance",
+                description="Complete ten kilometres",
+                start_date=today - timedelta(days=2),
+                target_distance_km=10,
+            )
+        )
+        active = state.save_plan(goal, old_config, state.plans_dir / "active.yaml", "high", ())
+        state.activate_plan(active.id)
+        state.refresh_progress(active.id, activities, today=today)
+        proposal = state.save_plan(
+            goal,
+            proposal_config,
+            state.plans_dir / "proposal.yaml",
+            "high",
+            ("Completed sessions are evidence only.",),
+            supersedes_plan_id=active.id,
+        )
+
+    response = app.test_client().get(f"/plans/{proposal.id}")
+
+    assert response.status_code == 200
+    assert b"3 completed or missed days" in response.data
+    assert b"5 upcoming scheduled days" in response.data
+    assert b"Completed 12 km today" in response.data
+    assert b"status-completed is-finished" in response.data
+    assert b"status-missed is-finished" in response.data
+    assert b"Today \xc2\xb7 scheduled" not in response.data
 
 
 def test_calendar_subdues_finished_rows_and_marks_the_next_action(tmp_path):

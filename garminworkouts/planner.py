@@ -9,7 +9,7 @@ import yaml
 
 from garminworkouts.replanning import normalized_easy_minutes, progress_statuses, workout_status
 
-ENGINE_VERSION = 3
+ENGINE_VERSION = 4
 
 
 @dataclass(frozen=True)
@@ -174,6 +174,7 @@ class DeterministicPlanner:
         quality_day = self._quality_day(selected_days, goal.long_run_day, goal.goal_type, actual_frequency)
 
         workouts = []
+        remaining_long_runs = []
         for workout_date in remaining_dates:
             # Keep each workout in its original block week. Re-numbering the first
             # remaining day as week zero would manufacture changes even when the
@@ -184,6 +185,7 @@ class DeterministicPlanner:
             )
             if workout_date.weekday() == goal.long_run_day:
                 workout = self._long_workout(goal, workout_date, week_index, long_run_km)
+                remaining_long_runs.append((week_index, workout))
             elif workout_date.weekday() == quality_day:
                 workout = self._quality_workout(goal, workout_date, week_index, baseline.confidence)
             else:
@@ -223,10 +225,23 @@ class DeterministicPlanner:
                 date.fromisoformat(workout_date) < today and status == "missed"
                 for (workout_date, _), status in statuses.items()
             )
+        long_run_rationale = []
+        if baseline.longest_run_km and remaining_long_runs:
+            if all(week_index >= 3 for week_index, _ in remaining_long_runs):
+                distances = ", ".join(workout["steps"][0]["distance"] for _, workout in remaining_long_runs)
+                long_run_rationale.append(
+                    f"The recent {baseline.longest_run_km:.1f} km maximum is planning evidence; the remaining "
+                    f"long-run distance is reduced to {distances} in the final lower-load week."
+                )
+            else:
+                long_run_rationale.append(
+                    f"Remaining long runs are anchored to the recent {baseline.longest_run_km:.1f} km maximum."
+                )
         rationale = [
             *frequency_rationale,
             f"Reassessed {baseline.run_count} recent runs and rebuilt only {len(workouts)} remaining scheduled days.",
             *fit_rationale,
+            *long_run_rationale,
             f"Kept {completed_count} completed workout(s) immutable and used them only as planning evidence.",
             f"Left {missed_count} missed past workout(s) in history; they are not moved or rescheduled automatically.",
         ]
@@ -312,7 +327,7 @@ class DeterministicPlanner:
         if goal.goal_type in {"complete_distance", "endurance", "consistency"} and week_index == 2:
             distance = baseline_km * 1.05
             if goal.target_distance_km:
-                distance = min(distance, goal.target_distance_km)
+                distance = min(distance, max(baseline_km, goal.target_distance_km))
         elif week_index >= 3:
             distance = baseline_km * 0.85
         else:

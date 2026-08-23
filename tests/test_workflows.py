@@ -2,7 +2,7 @@ from datetime import date
 
 import pytest
 
-from garminworkouts.state import AppState
+from garminworkouts.state import AppState, Goal
 from garminworkouts.workflows import PlannerWorkflow
 
 
@@ -54,6 +54,77 @@ def test_workflow_stores_and_validates_private_one_off_draft(tmp_path):
     assert draft_path.stat().st_mode & 0o777 == 0o600
     with pytest.raises(ValueError, match="Invalid draft"):
         workflow.load_one_off_draft("../escape")
+
+
+def test_workflow_requires_remaining_reassessment_when_an_active_plan_exists(tmp_path):
+    config = {
+        "name": "Active",
+        "workouts": [
+            {
+                "date": "2030-01-10",
+                "sport": "running",
+                "name": "300110 Easy30",
+                "steps": [{"type": "interval", "duration": "30:00"}],
+            }
+        ],
+    }
+    with AppState(tmp_path / "state") as state:
+        goal = state.save_goal(
+            Goal(
+                goal_type="complete_distance",
+                description="Complete ten kilometres",
+                start_date=date(2030, 1, 10),
+                target_distance_km=10,
+            )
+        )
+        active = state.save_plan(goal, config, state.plans_dir / "active.yaml", "moderate", ())
+        state.activate_plan(active.id)
+
+        with pytest.raises(ValueError, match="reassess its remaining workouts"):
+            PlannerWorkflow(state, today=date(2030, 1, 5)).generate_plan()
+
+
+def test_workflow_rejects_stale_replacement_with_immutable_dates_before_garmin(tmp_path):
+    old_config = {
+        "name": "Old",
+        "workouts": [
+            {
+                "date": "2030-01-01",
+                "sport": "running",
+                "name": "300101 Easy30",
+                "steps": [{"type": "interval", "duration": "30:00"}],
+            },
+            {
+                "date": "2030-01-10",
+                "sport": "running",
+                "name": "300110 Easy30",
+                "steps": [{"type": "interval", "duration": "30:00"}],
+            },
+        ],
+    }
+    with AppState(tmp_path / "state") as state:
+        goal = state.save_goal(
+            Goal(
+                goal_type="complete_distance",
+                description="Complete ten kilometres",
+                start_date=date(2030, 1, 1),
+                target_distance_km=10,
+            )
+        )
+        active = state.save_plan(goal, old_config, state.plans_dir / "old.yaml", "moderate", ())
+        state.activate_plan(active.id)
+        state.refresh_progress(active.id, [], today=date(2030, 1, 5))
+        stale = state.save_plan(
+            goal,
+            old_config,
+            state.plans_dir / "stale.yaml",
+            "moderate",
+            (),
+            supersedes_plan_id=active.id,
+        )
+
+        with pytest.raises(ValueError, match="past, completed, or missed"):
+            PlannerWorkflow(state, today=date(2030, 1, 5)).inspect_plan_conflicts(stale)
 
 
 def test_workflow_calendar_changes_keeps_elapsed_dates_out_of_removals():

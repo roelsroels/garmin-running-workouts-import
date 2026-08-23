@@ -17,6 +17,7 @@ from garminworkouts.app import (
 )
 from garminworkouts.garmin.ratelimit import GarminRateLimitError, has_reusable_tokens
 from garminworkouts.models.training_plan import TrainingPlan
+from garminworkouts.replanning import mutable_replacement_workouts
 from garminworkouts.state import AppState, Goal
 from garminworkouts.workflows import GarminAuthenticationRequiredError, PlannerWorkflow
 
@@ -159,8 +160,17 @@ def create_app(config=None):
     @app.post("/plans/generate")
     def generate_plan():
         with _state(app) as state:
-            record = PlannerWorkflow(state).generate_plan()
-        flash("A proposal was generated. Nothing has been changed in Garmin yet.", "success")
+            workflow = PlannerWorkflow(state)
+            if state.active_plan():
+                record, changes = workflow.adapt_plan()
+                if record is None:
+                    flash("The new evidence does not justify changing the remaining schedule.", "success")
+                    return redirect(url_for("dashboard"))
+                message = f"A remaining-workout proposal with {len(changes)} calendar change(s) is ready for review."
+            else:
+                record = workflow.generate_plan()
+                message = "A proposal was generated. Nothing has been changed in Garmin yet."
+        flash(message, "success")
         return redirect(url_for("review_plan", plan_id=record.id))
 
     @app.post("/plans/adapt")
@@ -175,6 +185,8 @@ def create_app(config=None):
 
     @app.get("/plans/<int:plan_id>")
     def review_plan(plan_id):
+        today_value = date.today()
+        today = today_value.isoformat()
         with _state(app) as state:
             record = state.plan(plan_id)
             if not record:
@@ -187,19 +199,36 @@ def create_app(config=None):
                 explanation = PlannerWorkflow(state).load_plan_explanation(plan_id)
             llm_enabled = state.get_setting("llm_provider", "none") != "none"
             old_record = state.plan(record.supersedes_plan_id) if record.supersedes_plan_id else None
+            old_progress = state.progress(old_record.id) if old_record else []
             changes = (
                 PlannerWorkflow.calendar_changes(
                     old_record.config,
                     record.config,
-                    progress=state.progress(old_record.id),
+                    today=today_value,
+                    progress=old_progress,
                 )
                 if old_record
                 else [f"{item['date']}: add {item['name']}" for item in record.config.get("workouts", [])]
             )
+            workouts = mutable_replacement_workouts(
+                old_record.config if old_record else {"workouts": []},
+                record.config,
+                today=today_value,
+                progress=old_progress,
+            )
+            history = []
+            if old_record:
+                history = [
+                    row
+                    for row in _workout_rows(state, old_record, today_value)
+                    if row["date"] < today or row["status"] != "scheduled"
+                ]
         return render_template(
             "plan.html",
             plan=record,
-            workouts=record.config.get("workouts", []),
+            workouts=workouts,
+            history=history,
+            today=today,
             preview=preview,
             changes=changes,
             explanation=explanation,
@@ -259,36 +288,7 @@ def create_app(config=None):
             plan = state.active_plan()
             if not plan:
                 return render_template("calendar.html", plan=None, rows=[], today=today)
-            progress = {(row["workout_date"], row["workout_name"]): row for row in state.progress(plan.id)}
-            rows = []
-            for workout in plan.config.get("workouts", []):
-                row = progress.get((str(workout["date"]), workout["name"]), {})
-                workout_date = date.fromisoformat(str(workout["date"]))
-                status = row.get("status", "scheduled")
-                inferred_missed = status == "scheduled" and workout_date < today_value
-                if inferred_missed:
-                    status = "missed"
-                execution_score = row.get("execution_score")
-                if execution_score is None:
-                    execution_score_band = "unavailable"
-                elif execution_score >= 67:
-                    execution_score_band = "good"
-                elif execution_score >= 34:
-                    execution_score_band = "average"
-                else:
-                    execution_score_band = "low"
-                rows.append(
-                    {
-                        **workout,
-                        "date": workout_date.isoformat(),
-                        "status": status,
-                        "status_label": "Missed · needs refresh" if inferred_missed else status,
-                        "inferred_missed": inferred_missed,
-                        "execution_score": execution_score,
-                        "execution_score_checked": bool(row.get("execution_score_checked_at")),
-                        "execution_score_band": execution_score_band,
-                    }
-                )
+            rows = _workout_rows(state, plan, today_value)
         return render_template("calendar.html", plan=plan, rows=rows, today=today)
 
     @app.get("/cleanup")
@@ -410,6 +410,40 @@ def create_app(config=None):
 
 def _state(app):
     return AppState(app.config["DATA_DIR"])
+
+
+def _workout_rows(state, plan, today):
+    progress = {(row["workout_date"], row["workout_name"]): row for row in state.progress(plan.id)}
+    rows = []
+    for workout in plan.config.get("workouts", []):
+        row = progress.get((str(workout["date"]), workout["name"]), {})
+        workout_date = date.fromisoformat(str(workout["date"]))
+        status = row.get("status", "scheduled")
+        inferred_missed = status == "scheduled" and workout_date < today
+        if inferred_missed:
+            status = "missed"
+        execution_score = row.get("execution_score")
+        if execution_score is None:
+            execution_score_band = "unavailable"
+        elif execution_score >= 67:
+            execution_score_band = "good"
+        elif execution_score >= 34:
+            execution_score_band = "average"
+        else:
+            execution_score_band = "low"
+        rows.append(
+            {
+                **workout,
+                "date": workout_date.isoformat(),
+                "status": status,
+                "status_label": "Missed · needs refresh" if inferred_missed else status,
+                "inferred_missed": inferred_missed,
+                "execution_score": execution_score,
+                "execution_score_checked": bool(row.get("execution_score_checked_at")),
+                "execution_score_band": execution_score_band,
+            }
+        )
+    return rows
 
 
 def _checked(name):

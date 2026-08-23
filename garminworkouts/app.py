@@ -16,7 +16,7 @@ from garminworkouts.models.heart_rate import HeartRateRange, validate_heart_rate
 from garminworkouts.models.training_plan import TrainingPlan
 from garminworkouts.plan import PlanApplier
 from garminworkouts.planner import DeterministicPlanner, write_plan
-from garminworkouts.replanning import calendar_changes, immutable_workout_keys
+from garminworkouts.replanning import calendar_changes, immutable_workout_keys, validate_mutable_replacement
 from garminworkouts.retire import PlanRetirement, ScheduledConflictCleanup
 from garminworkouts.state import Goal
 
@@ -241,6 +241,8 @@ class InteractiveApp:
         goal = self.state.active_goal()
         if not goal:
             raise ValueError("Create a goal before generating a plan")
+        if replace_active and self.state.active_plan():
+            return self.adapt()
         activities = self._fetch_recent_history()
         proposal = self.planner.generate(goal, activities)
         plan_path = self._plan_path(proposal.config)
@@ -686,6 +688,12 @@ class InteractiveApp:
             self.console.write("Garmin refresh was unavailable; showing the most recently stored progress.")
 
     def _apply_replacement(self, new_record, old_record=None):
+        validate_mutable_replacement(
+            old_record.config if old_record else {"workouts": []},
+            new_record.config,
+            today=self.today,
+            progress=self.state.progress(old_record.id) if old_record else None,
+        )
         new_plan = TrainingPlan(new_record.config)
         changes_started = False
         try:

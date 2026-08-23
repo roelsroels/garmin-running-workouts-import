@@ -1,13 +1,63 @@
 {% extends "base.html" %}
 {% block title %}Review proposal · Running Planner{% endblock %}
 {% block content %}
-  <div class="page-heading"><div><p class="eyebrow">Preview only</p><h1>{{ plan.name }}</h1><p>{{ plan.start_date.strftime('%d %b %Y') }} – {{ plan.end_date.strftime('%d %b %Y') }} · confidence {{ plan.confidence }}</p></div><span class="status-pill">{{ plan.status }}</span></div>
-  <section class="card"><div class="card-heading"><div><h2>Why this proposal</h2><p class="muted">Deterministic planner rationale and, optionally, a plain-language LLM explanation.</p></div>{% if llm_enabled %}<form method="post" action="{{ url_for('explain_plan', plan_id=plan.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="inspected" value="{{ 1 if preview is not none else 0 }}"><button class="button secondary">Explain this proposal</button></form>{% endif %}</div><ul class="rationale">{% for reason in plan.rationale %}<li>{{ reason }}</li>{% endfor %}</ul>{% if explanation %}<div class="explanation"><strong>Optional LLM explanation</strong><p>{{ explanation }}</p></div>{% endif %}</section>
-  <section class="card"><h2>Calendar changes</h2><ul class="compact-list">{% for change in changes %}<li>{{ change }}</li>{% endfor %}</ul></section>
-  <section class="schedule-list"><div class="section-title"><p class="eyebrow">Workout chain</p><h2>{{ workouts|length }} scheduled days</h2></div>{% for workout in workouts %}<article class="schedule-row"><time>{{ workout.date }}</time><div><strong>{{ workout.name }}</strong><p>{{ workout.description }}</p></div><span>{{ workout.steps|length }} part{{ '' if workout.steps|length == 1 else 's' }}</span></article>{% endfor %}</section>
+  <div class="page-heading">
+    <div>
+      <p class="eyebrow">Preview only</p>
+      <h1>{{ plan.name }}</h1>
+      <p>{{ plan.start_date.strftime('%d %b %Y') }} – {{ plan.end_date.strftime('%d %b %Y') }} · confidence {{ plan.confidence }}</p>
+    </div>
+    <span class="status-pill">{{ plan.status }}</span>
+  </div>
+
+  <section class="card">
+    <div class="card-heading">
+      <div><h2>Why this proposal</h2><p class="muted">Deterministic planner rationale and, optionally, a plain-language LLM explanation.</p></div>
+      {% if llm_enabled %}<form method="post" action="{{ url_for('explain_plan', plan_id=plan.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="inspected" value="{{ 1 if preview is not none else 0 }}"><button class="button secondary">Explain this proposal</button></form>{% endif %}
+    </div>
+    <ul class="rationale">{% for reason in plan.rationale %}<li>{{ reason }}</li>{% endfor %}</ul>
+    {% if explanation %}<div class="explanation"><strong>Optional LLM explanation</strong><p>{{ explanation }}</p></div>{% endif %}
+  </section>
+
+  <section class="card"><h2>Calendar changes</h2><ul class="compact-list">{% for change in changes %}<li>{{ change }}</li>{% else %}<li>No upcoming calendar changes.</li>{% endfor %}</ul></section>
+
+  {% if history %}
+    <section class="schedule-list">
+      <div class="section-title"><p class="eyebrow">Plan history</p><h2>{{ history|length }} completed or missed day{{ '' if history|length == 1 else 's' }}</h2></div>
+      {% for workout in history %}
+        {% set status_label = workout.status_label if workout.status_label is defined else workout.status %}
+        <article class="schedule-row status-{{ workout.status }} is-finished{% if workout.inferred_missed|default(false) %} is-inferred-missed{% endif %}">
+          <time>{{ workout.date }}</time>
+          <div>
+            <strong>{{ workout.name }}</strong>
+            <p>{{ workout.description }}</p>
+            {% if workout.status == 'completed' %}<span class="execution-score {{ workout.execution_score_band|default('unavailable') }}">{% if workout.execution_score is defined and workout.execution_score is not none %}Execution score {{ workout.execution_score|int }}%{% elif workout.execution_score_checked|default(false) %}Execution score unavailable{% else %}Execution score pending refresh{% endif %}</span>{% endif %}
+          </div>
+          <span class="status-pill {{ workout.status }}">{{ status_label }}</span>
+        </article>
+      {% endfor %}
+    </section>
+  {% endif %}
+
+  <section class="schedule-list">
+    <div class="section-title"><p class="eyebrow">Upcoming proposal</p><h2>{{ workouts|length }} upcoming scheduled day{{ '' if workouts|length == 1 else 's' }}</h2></div>
+    {% set next_action = namespace(found=false) %}
+    {% for workout in workouts %}
+      {% set is_today = workout.date|string == today %}
+      {% set is_next = not next_action.found %}
+      {% if is_next %}{% set next_action.found = true %}{% endif %}
+      <article class="schedule-row status-scheduled{% if is_next %} is-next-action{% endif %}">
+        <time>{{ workout.date }}</time>
+        <div><strong>{{ workout.name }}</strong><p>{{ workout.description }}</p></div>
+        <span class="status-pill scheduled{% if is_today %} today{% endif %}">{% if is_today %}Today · {% endif %}scheduled</span>
+      </article>
+    {% else %}
+      <article class="card"><p class="muted">No upcoming mutable workouts are included.</p></article>
+    {% endfor %}
+  </section>
 
   {% if preview is none %}
-    <section class="approval-box"><div><h2>Inspect Garmin before applying</h2><p>The next step reads calendar entries on these dates and shows exactly what would be replaced. It does not make changes.</p></div><form method="post" action="{{ url_for('inspect_plan', plan_id=plan.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button primary">Inspect Garmin schedule</button></form></section>
+    <section class="approval-box"><div><h2>Inspect Garmin before applying</h2><p>The next step reads calendar entries on these upcoming dates and shows exactly what would be replaced. It does not make changes.</p></div><form method="post" action="{{ url_for('inspect_plan', plan_id=plan.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button primary">Inspect Garmin schedule</button></form></section>
   {% else %}
     {% include "conflict_form.html" %}
     <form class="approval-box vertical" method="post" action="{{ url_for('apply_plan', plan_id=plan.id) }}">

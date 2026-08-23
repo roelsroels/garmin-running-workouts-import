@@ -9,6 +9,10 @@ All notable changes to Garmin Running Workouts Import are documented here. The p
   upcoming scheduled workouts, and leaves missed past workouts in history instead of moving them automatically.
 - Duration-based easy workouts are normalized to the nearest five minutes, and normalized comparisons suppress
   rounding-only calendar changes.
+- Active-plan generation now reassesses only the remaining mutable schedule, using completed runs as evidence while
+  keeping them in a separate completed/missed history on proposal reviews.
+- Replacement proposals that still contain past, completed, or missed workouts are rejected before Garmin is read or
+  changed, and final-week long runs retain their intended lower-load reduction.
 
 ## [1.1.0] - 2026-08-23
 
