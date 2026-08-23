@@ -8,13 +8,13 @@ Current release: **1.0.0** · [Changelog](CHANGELOG.md) · [Release notes](docs/
 
 ## Screenshots
 
-These examples use an anonymized demo runner; they contain no real Garmin credentials or activity data.
+These examples use a fully synthetic runner profile; they contain no real Garmin credentials or activity data. The calendar deliberately includes completed, missed, current-day, and future workouts so every visual state is represented.
 
 ![Web dashboard showing the active running goal, heart-rate guidance, training-block progress, and next workout](docs/images/web-dashboard.jpg)
 
-| Four-week training calendar | Heart-rate workout builder |
+| Status-aware training calendar | Heart-rate workout builder |
 | --- | --- |
-| ![Training calendar showing completed and scheduled running workouts](docs/images/web-calendar.jpg) | ![Heart-rate workout builder with sequential time and maximum-BPM steps](docs/images/web-heart-rate-workout.jpg) |
+| ![Training calendar showing completed runs with execution scores, missed runs, today's next workout, and future scheduled runs](docs/images/web-calendar.jpg) | ![Heart-rate workout builder with sequential time and maximum-BPM steps](docs/images/web-heart-rate-workout.jpg) |
 
 ## Features
 
@@ -33,6 +33,8 @@ These examples use an anonymized demo runner; they contain no real Garmin creden
 - Local decoding of FIT files with Garmin's official FIT SDK.
 - An interactive, goal-driven planner: no YAML editing is required for normal use.
 - A dashboard with the active goal, completed/missed/remaining days, and the next workout.
+- A date-aware calendar that subdues finished dates, identifies missed runs, highlights today's workout, and keeps the next actionable run obvious.
+- Garmin workout execution scores for completed planned runs, fetched once from original FIT data when necessary and cached locally.
 - Supervised mid-block adaptation that replaces only future workouts after explicit approval.
 - Garmin-side overlap detection with explicit consent to retire pre-existing schedules and obsolete templates.
 - An on-demand cleanup action that protects the active local plan while removing older Garmin entries on the same dates.
@@ -81,7 +83,7 @@ On first use, the wizard asks only for the information needed to construct a pla
 3. Whether optional LLM explanations should be enabled. The planner itself does not require an LLM.
 4. Whether to fetch recent Garmin history, generate a proposal, and review it before scheduling.
 
-Later starts open a readable dashboard. From there, refresh completed runs, view the full calendar, revise the goal, generate a new block, or assess completed FIT files and propose an adaptation to the remaining dates.
+Later starts open a readable dashboard. From there, refresh completed runs and their available Garmin execution scores, view the full status-aware calendar, revise the goal, generate a new block, or assess completed FIT files and propose an adaptation to the remaining dates.
 
 Nothing is changed in Garmin merely by opening the app or generating a proposal. Upload, scheduling, and replacement each require confirmation. When replacing a block, the tool uploads the approved replacement first, then unschedules future entries from the retired block and deletes only its obsolete workout templates. Completed Garmin activities and downloaded FIT files are never deleted.
 
@@ -95,7 +97,7 @@ The main menu also includes **Create a one-off heart-rate workout**. It builds s
 
 The architecture-independent local state defaults to `~/.garmin-running-workouts/` and contains:
 
-- `state.sqlite3`: goals, plan history, progress, settings, and an audit trail;
+- `state.sqlite3`: goals, plan history, workout status, cached execution scores, settings, and an audit trail;
 - `tokens/`: reusable Garmin session tokens;
 - `plans/`: generated, reviewable YAML plans;
 - `activities/`: private FIT assessment bundles and decoded JSON evidence.
@@ -128,13 +130,27 @@ The web dashboard provides:
 
 - goal, availability, distance/time/pace, planning-period, and constraint forms;
 - independent maximum-BPM, BPM-range, or Garmin-zone targets for every workout phase;
-- current block progress, next workout, and complete calendar views;
+- current block progress, next workout, and a status-aware calendar with completed, missed, today, and future states;
+- cached Garmin execution scores for completed planned workouts when the activity FIT file provides one;
 - preview-only plan generation and FIT-driven adaptation;
 - an explicit Garmin conflict inspection and removal decision before application;
 - protected cleanup of duplicates already present in Garmin;
 - a dynamic one-off heart-rate workout builder;
 - Garmin reconnection without storing the password; and
 - optional provider-neutral LLM settings without storing an API key.
+
+### Calendar status and execution scores
+
+The CLI and web calendar use the same local progress state:
+
+- **Completed** means a running activity was matched to that planned date. The row is subdued because no action remains.
+- **Missed** means the planned date has passed without a matched run after a progress refresh. If the date has elapsed but Garmin has not yet been refreshed, the web calendar shows **Missed · needs refresh** so provisional state is not mistaken for confirmed history.
+- **Today · scheduled** marks a planned run on the current date. The first scheduled workout on today or a future date also receives the prominent **Next** treatment.
+- **Scheduled** identifies later workouts that remain in the active block.
+
+For a completed planned run, the tool displays Garmin's workout execution score when Garmin recorded one. If the normal activity summary does not include it, the refresh workflow downloads that activity's original FIT file once, reads the score, and caches both the value and the checked state in SQLite. Later page loads do not download the activity again.
+
+Garmin describes this score as adherence to the targets of a structured workout, not as a general fitness, effort, recovery, or health score. Garmin only calculates it for workouts with heart-rate, speed, pace, or power targets. The interface uses Garmin's documented bands: **good** 67–100%, **average** 34–66%, and **low** 0–33%. A completed run can legitimately show **Execution score unavailable** when no supported target or score was recorded. See Garmin's [workout execution score documentation](https://www8.garmin.com/manuals/webhelp/GUID-69467D38-DE67-4A49-A78A-F7C809EFF8B5/EN-US/MARQ_Athlete_%28Gen_2%29_OM_EN-US.pdf).
 
 For local development only:
 
