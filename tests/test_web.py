@@ -36,11 +36,29 @@ def test_web_dashboard_goal_calendar_and_settings_render(tmp_path):
     assert b"https://github.com/roelsroels/garmin-running-workouts-import" in dashboard.data
     assert b"https://cdnjs.buymeacoffee.com/1.0.0/button.prod.min.js" in dashboard.data
     assert b'data-text="Buy me a beer"' in dashboard.data
+    assert b'id="wait-overlay" role="status" aria-live="polite"' in dashboard.data
+    assert b'class="running-puppet"' in dashboard.data
+    assert b'data-loading-message="Building your first proposal' in dashboard.data
 
     for path in ("/goal", "/calendar", "/cleanup", "/workouts/new", "/settings"):
         response = client.get(path)
         assert response.status_code == 200
         assert b"Running Planner" in response.data
+
+
+def test_web_wait_state_assets_are_accessible_and_form_driven(tmp_path):
+    client = _app(tmp_path).test_client()
+
+    script = client.get("/static/web.js")
+    styles = client.get("/static/web.css")
+
+    assert script.status_code == 200
+    assert b"form[data-loading-message]" in script.data
+    assert b'form.setAttribute("aria-busy", "true")' in script.data
+    assert b'window.addEventListener("pageshow", hideWaitState)' in script.data
+    assert styles.status_code == 200
+    assert b".running-puppet" in styles.data
+    assert b"@media (prefers-reduced-motion: reduce)" in styles.data
 
 
 def test_web_favicon_is_served_as_svg(tmp_path):

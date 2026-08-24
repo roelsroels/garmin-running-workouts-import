@@ -41,5 +41,24 @@
         </div>
       </div>
     </footer>
+    <div class="wait-overlay" id="wait-overlay" role="status" aria-live="polite" aria-atomic="true" hidden>
+      <div class="wait-card">
+        <svg class="running-puppet" viewBox="0 0 120 120" aria-hidden="true">
+          <ellipse class="runner-shadow" cx="60" cy="108" rx="34" ry="5"></ellipse>
+          <g class="runner-body">
+            <path class="runner-limb runner-arm runner-arm-back" d="M59 44 L44 57 L31 50"></path>
+            <path class="runner-limb runner-leg runner-leg-back" d="M57 68 L43 86 L29 101"></path>
+            <path class="runner-torso" d="M63 38 C58 49 55 59 57 69"></path>
+            <circle class="runner-head" cx="67" cy="26" r="9"></circle>
+            <path class="runner-limb runner-arm runner-arm-front" d="M61 44 L77 55 L89 43"></path>
+            <path class="runner-limb runner-leg runner-leg-front" d="M57 68 L73 83 L91 96"></path>
+          </g>
+        </svg>
+        <p class="eyebrow">Runner at work</p>
+        <h2 id="wait-title">Working on it…</h2>
+        <p id="wait-detail">Please keep this page open while the request finishes.</p>
+        <div class="wait-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+      </div>
+    </div>
   </body>
 </html>

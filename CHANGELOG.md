@@ -5,6 +5,16 @@ All notable changes to Garmin Running Workouts Import are documented here. The p
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-08-24
+
+Slow Garmin operations now provide a clear, accessible waiting state instead of leaving the submitted page looking
+unresponsive.
+
+### Added
+
+- Added an accessible running-puppet wait screen for Garmin-backed actions so slow schedule, refresh, inspection, and
+  connection requests clearly remain in progress.
+
 ## [1.2.0] - 2026-08-23
 
 Replanning now uses completed training as immutable evidence while limiting proposals and Garmin changes to the

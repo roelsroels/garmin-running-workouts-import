@@ -13,7 +13,7 @@
   <section class="card">
     <div class="card-heading">
       <div><h2>Why this proposal</h2><p class="muted">Deterministic planner rationale and, optionally, a plain-language LLM explanation.</p></div>
-      {% if llm_enabled %}<form method="post" action="{{ url_for('explain_plan', plan_id=plan.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="inspected" value="{{ 1 if preview is not none else 0 }}"><button class="button secondary">Explain this proposal</button></form>{% endif %}
+      {% if llm_enabled %}<form method="post" action="{{ url_for('explain_plan', plan_id=plan.id) }}" data-loading-message="Writing the proposal explanation…" data-loading-detail="The planning service is turning the deterministic rationale into plain language."><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><input type="hidden" name="inspected" value="{{ 1 if preview is not none else 0 }}"><button class="button secondary">Explain this proposal</button></form>{% endif %}
     </div>
     <ul class="rationale">{% for reason in plan.rationale %}<li>{{ reason }}</li>{% endfor %}</ul>
     {% if explanation %}<div class="explanation"><strong>Optional LLM explanation</strong><p>{{ explanation }}</p></div>{% endif %}
@@ -57,10 +57,10 @@
   </section>
 
   {% if preview is none %}
-    <section class="approval-box"><div><h2>Inspect Garmin before applying</h2><p>The next step reads calendar entries on these upcoming dates and shows exactly what would be replaced. It does not make changes.</p></div><form method="post" action="{{ url_for('inspect_plan', plan_id=plan.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button primary">Inspect Garmin schedule</button></form></section>
+    <section class="approval-box"><div><h2>Inspect Garmin before applying</h2><p>The next step reads calendar entries on these upcoming dates and shows exactly what would be replaced. It does not make changes.</p></div><form method="post" action="{{ url_for('inspect_plan', plan_id=plan.id) }}" data-loading-message="Checking Garmin’s calendar…" data-loading-detail="Reading the upcoming dates before anything can be applied."><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button primary">Inspect Garmin schedule</button></form></section>
   {% else %}
     {% include "conflict_form.html" %}
-    <form class="approval-box vertical" method="post" action="{{ url_for('apply_plan', plan_id=plan.id) }}">
+    <form class="approval-box vertical" method="post" action="{{ url_for('apply_plan', plan_id=plan.id) }}" data-loading-message="Applying your new schedule…" data-loading-detail="Garmin is creating the workouts and updating the upcoming calendar. This can take several seconds.">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       {% if preview.summary.overlapping_calendar_entries %}
         <label class="consent"><input type="checkbox" name="remove_conflicts" value="1" checked><span><strong>Remove the listed calendar conflicts after the new plan uploads</strong><small>Completed activities and FIT files are never touched.</small></span></label>
