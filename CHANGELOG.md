@@ -5,6 +5,10 @@ All notable changes to Garmin Running Workouts Import are documented here. The p
 
 ## [Unreleased]
 
+### Added
+
+- The web footer now shows the running application version and Git branch for quick deployment identification.
+
 ## [1.2.1] - 2026-08-24
 
 Slow Garmin operations now provide a clear, accessible waiting state instead of leaving the submitted page looking

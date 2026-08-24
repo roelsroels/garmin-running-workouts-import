@@ -1,6 +1,10 @@
 import os
 import secrets
+import subprocess
+import tomllib
 from datetime import date, timedelta
+from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 
 from flask import Flask, abort, flash, redirect, render_template, request, session, url_for
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -30,6 +34,49 @@ GOAL_TYPES = (
     ("consistency", "Build running consistency"),
 )
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _application_version():
+    configured = os.getenv("GARMIN_APP_VERSION", "").strip()
+    if configured:
+        return configured
+    try:
+        with (PROJECT_ROOT / "pyproject.toml").open("rb") as project_file:
+            return str(tomllib.load(project_file)["project"]["version"])
+    except (KeyError, OSError, tomllib.TOMLDecodeError):
+        pass
+    try:
+        return version("garmin-running-workouts-import")
+    except PackageNotFoundError:
+        return "unknown"
+
+
+def _git_output(*arguments):
+    try:
+        result = subprocess.run(
+            ["git", *arguments],
+            cwd=PROJECT_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return result.stdout.strip()
+
+
+def _application_branch():
+    configured = os.getenv("GARMIN_APP_BRANCH", "").strip()
+    if configured:
+        return configured
+    branch = _git_output("symbolic-ref", "--short", "HEAD")
+    if branch:
+        return branch
+    commit = _git_output("rev-parse", "--short", "HEAD")
+    return f"detached@{commit}" if commit else "unknown"
+
 
 def create_app(config=None):
     app = Flask(__name__, template_folder="templates", static_folder="static")
@@ -43,6 +90,10 @@ def create_app(config=None):
     )
     if config:
         app.config.update(config)
+    if "APP_VERSION" not in app.config:
+        app.config["APP_VERSION"] = _application_version()
+    if "APP_BRANCH" not in app.config:
+        app.config["APP_BRANCH"] = _application_branch()
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
     @app.before_request
@@ -78,6 +129,8 @@ def create_app(config=None):
         if "csrf_token" not in session:
             session["csrf_token"] = secrets.token_urlsafe(32)
         return {
+            "app_branch": app.config["APP_BRANCH"],
+            "app_version": app.config["APP_VERSION"],
             "csrf_token": session["csrf_token"],
             "weekday_names": WEEKDAYS,
         }

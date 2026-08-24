@@ -15,6 +15,8 @@ def _app(tmp_path):
             "DATA_DIR": str(tmp_path / "state"),
             "SECRET_KEY": "test-secret-key",
             "SESSION_COOKIE_SECURE": False,
+            "APP_VERSION": "1.2.1-test",
+            "APP_BRANCH": "test-branch",
         }
     )
 
@@ -36,6 +38,9 @@ def test_web_dashboard_goal_calendar_and_settings_render(tmp_path):
     assert b"https://github.com/roelsroels/garmin-running-workouts-import" in dashboard.data
     assert b"https://cdnjs.buymeacoffee.com/1.0.0/button.prod.min.js" in dashboard.data
     assert b'data-text="Buy me a beer"' in dashboard.data
+    assert b'aria-label="Running version 1.2.1-test on branch test-branch"' in dashboard.data
+    assert b">v1.2.1-test</code>" in dashboard.data
+    assert b">test-branch</code>" in dashboard.data
     assert b'id="wait-overlay" role="status" aria-live="polite"' in dashboard.data
     assert b'class="running-puppet"' in dashboard.data
     assert b'data-loading-message="Building your first proposal' in dashboard.data
