@@ -1,6 +1,6 @@
 [project]
 name = "garmin-running-workouts-import"
-version = "1.3.0"
+version = "1.4.0"
 description = "Assess activities and create, schedule, and manage running workouts in Garmin Connect"
 readme = "README.md"
 license = "Apache-2.0"

@@ -5,10 +5,25 @@ All notable changes to Garmin Running Workouts Import are documented here. The p
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-08-27
+
+The web interface now follows your system appearance, with an optional light or dark override on every page.
+
 ### Added
 
 - System-aware light and dark web themes, with a top-right System / Light / Dark switch on every page. Manual
   preferences persist in the browser; system changes are followed automatically when no override is selected.
+
+### Changed
+
+- Forms, calendar status badges, completed and missed rows, and the waiting screen use coordinated light and dark
+  palettes. Completed rows remain subdued without reducing text opacity.
+- The README now shows uploaded Garmin Connect workouts and explains approval, automatic upload, scheduling,
+  and the separate watch-sync and calendar-export steps more prominently.
+
+### Fixed
+
+- The source distribution includes the JavaScript theme tests required by the Python test wrapper.
 
 ## [1.3.0] - 2026-08-27
 
