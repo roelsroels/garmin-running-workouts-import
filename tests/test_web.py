@@ -1,4 +1,5 @@
 from datetime import date, datetime, timedelta
+from unittest.mock import Mock
 
 from flask import render_template
 from werkzeug.datastructures import MultiDict
@@ -409,3 +410,102 @@ def test_calendar_shows_execution_score_for_completed_run(tmp_path):
     assert response.status_code == 200
     assert b"Execution score 92%" in response.data
     assert b"execution-score good" in response.data
+
+
+def _seed_calendar_for_export(app):
+    today = date.today()
+    entries = [
+        (-2, "Elapsed", "scheduled"),
+        (-1, "Completed", "completed"),
+        (-1, "Missed", "missed"),
+        (0, "Completed today", "completed"),
+        (0, "Today run", "scheduled"),
+        (1, "Skipped", "skipped"),
+        (2, "Future run", "scheduled"),
+    ]
+    config = {
+        "name": "Calendar block",
+        "workouts": [
+            {
+                "date": (today + timedelta(days=offset)).isoformat(),
+                "sport": "running",
+                "name": name,
+                "description": "Easy running; HR ≤140 bpm",
+                "steps": [{"type": "interval", "duration": "30:00"}],
+            }
+            for offset, name, _status in entries
+        ],
+    }
+    with AppState(app.config["DATA_DIR"]) as state:
+        goal = state.save_goal(
+            Goal(
+                goal_type="complete_distance", description="Run ten kilometres", start_date=today, target_distance_km=10
+            )
+        )
+        unrelated_config = {**config, "workouts": [{**config["workouts"][-1], "name": "Not active"}]}
+        retired = state.save_plan(goal, unrelated_config, state.plans_dir / "old.yaml", "moderate", ())
+        state.activate_plan(retired.id)
+        active = state.save_plan(goal, config, state.plans_dir / "active.yaml", "moderate", ())
+        state.activate_plan(active.id)
+        state.save_plan(goal, unrelated_config, state.plans_dir / "draft.yaml", "moderate", ())
+        for _offset, name, status in entries:
+            state.connection.execute(
+                "UPDATE plan_progress SET status = ? WHERE plan_id = ? AND workout_name = ?",
+                (status, active.id, name),
+            )
+        state.connection.commit()
+        return active, state.progress(active.id)
+
+
+def test_calendar_download_only_exports_upcoming_active_runs_without_garmin_calls(tmp_path, monkeypatch):
+    app = _app(tmp_path)
+    active, progress_before = _seed_calendar_for_export(app)
+    garmin = Mock(side_effect=AssertionError("Calendar export must not contact Garmin"))
+    monkeypatch.setattr("garminworkouts.workflows.PlannerWorkflow.garmin_client", garmin)
+    client = app.test_client()
+
+    page = client.get("/calendar")
+    response = client.get("/calendar.ics")
+    repeated = client.get("/calendar.ics")
+
+    assert b'href="/calendar.ics" download>Add to calendar (.ics)</a>' in page.data
+    assert b"one-time import" in page.data
+    assert response.status_code == 200
+    assert response.headers["Content-Type"] == "text/calendar; charset=utf-8"
+    assert response.headers["Content-Disposition"] == (
+        f'attachment; filename="running-plan-{active.start_date.isoformat()}.ics"'
+    )
+    assert response.headers["Cache-Control"] == "no-store"
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+    content = response.get_data(as_text=True).replace("\r\n ", "")
+    assert content.count("BEGIN:VEVENT\r\n") == 2
+    assert "SUMMARY:Today run\r\n" in content
+    assert "SUMMARY:Future run\r\n" in content
+    assert "HR ≤140 bpm" in content
+    for name in ("Elapsed", "Completed", "Missed", "Completed today", "Skipped", "Not active"):
+        assert f"SUMMARY:{name}\r\n" not in content
+    assert [line for line in response.data.splitlines() if line.startswith(b"UID:")] == [
+        line for line in repeated.data.splitlines() if line.startswith(b"UID:")
+    ]
+    garmin.assert_not_called()
+    with AppState(app.config["DATA_DIR"]) as state:
+        assert state.progress(active.id) == progress_before
+
+
+def test_calendar_download_is_unavailable_without_an_active_plan(tmp_path):
+    client = _app(tmp_path).test_client()
+
+    assert b'href="/calendar.ics"' not in client.get("/calendar").data
+    assert client.get("/calendar.ics").status_code == 404
+
+
+def test_calendar_download_is_unavailable_when_no_upcoming_runs_remain(tmp_path):
+    app = _app(tmp_path)
+    active, _progress = _seed_calendar_for_export(app)
+    with AppState(app.config["DATA_DIR"]) as state:
+        state.connection.execute("UPDATE plan_progress SET status = 'completed' WHERE plan_id = ?", (active.id,))
+        state.connection.commit()
+    client = app.test_client()
+
+    assert b'href="/calendar.ics"' not in client.get("/calendar").data
+    assert client.get("/calendar.ics").status_code == 404

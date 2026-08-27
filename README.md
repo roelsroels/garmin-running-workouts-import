@@ -131,6 +131,7 @@ The web dashboard provides:
 - goal, availability, distance/time/pace, planning-period, and constraint forms;
 - independent maximum-BPM, BPM-range, or Garmin-zone targets for every workout phase;
 - current block progress, next workout, and a status-aware calendar with completed, missed, today, and future states;
+- an iCalendar (.ics) download of upcoming scheduled runs for Apple Calendar and other calendar apps;
 - cached Garmin execution scores for completed planned workouts when the activity FIT file provides one;
 - preview-only plan generation and FIT-driven adaptation;
 - an explicit Garmin conflict inspection and removal decision before application;
@@ -151,6 +152,24 @@ The CLI and web calendar use the same local progress state:
 For a completed planned run, the tool displays Garmin's workout execution score when Garmin recorded one. If the normal activity summary does not include it, the refresh workflow downloads that activity's original FIT file once, reads the score, and caches both the value and the checked state in SQLite. Later page loads do not download the activity again.
 
 Garmin describes this score as adherence to the targets of a structured workout, not as a general fitness, effort, recovery, or health score. Garmin only calculates it for workouts with heart-rate, speed, pace, or power targets. The interface uses Garmin's documented bands: **good** 67–100%, **average** 34–66%, and **low** 0–33%. A completed run can legitimately show **Execution score unavailable** when no supported target or score was recorded. See Garmin's [workout execution score documentation](https://www8.garmin.com/manuals/webhelp/GUID-69467D38-DE67-4A49-A78A-F7C809EFF8B5/EN-US/MARQ_Athlete_%28Gen_2%29_OM_EN-US.pdf).
+
+### Add planned runs to Apple Calendar
+
+Open **Calendar** in the web interface and click **Add to calendar (.ics)**. Open the downloaded file on your Mac and
+choose a destination calendar. Alternatively, use **File → Import** in Apple Calendar and select the file.
+See Apple's [calendar import instructions](https://support.apple.com/guide/calendar/import-or-export-calendars-icl1023/mac).
+
+The export includes today's and future **scheduled** runs from the active plan, with workout names and instructions.
+Completed, missed, skipped, retired, and past entries are not exported. Because the planner stores dates rather than
+start times, each run is an all-day event, marked as not busy. The link is hidden when no upcoming runs remain.
+
+This is a one-time snapshot, not a subscription or two-way sync. Replanning in Garmin will not update or remove
+previously imported events. Event IDs remain stable for repeated downloads of the same plan, but calendar apps handle
+re-imports differently. Use a separate calendar for these runs and remove superseded future events before importing a
+replacement block. Downloading does not contact Garmin, change your plan, or add events without your approval in the
+calendar app. The file contains workout information, so keep it private if you do not intend to share it.
+
+### Run the web planner locally
 
 For local development only:
 

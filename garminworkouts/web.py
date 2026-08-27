@@ -6,7 +6,7 @@ from datetime import date, timedelta
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
-from flask import Flask, abort, flash, redirect, render_template, request, session, url_for
+from flask import Flask, Response, abort, flash, redirect, render_template, request, session, url_for
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from garminworkouts.app import (
@@ -19,6 +19,7 @@ from garminworkouts.app import (
     _parse_heart_rate_target,
     _parse_pace,
 )
+from garminworkouts.calendar_export import build_calendar, upcoming_runs
 from garminworkouts.garmin.ratelimit import GarminRateLimitError, has_reusable_tokens
 from garminworkouts.models.training_plan import TrainingPlan
 from garminworkouts.replanning import mutable_replacement_workouts
@@ -342,7 +343,26 @@ def create_app(config=None):
             if not plan:
                 return render_template("calendar.html", plan=None, rows=[], today=today)
             rows = _workout_rows(state, plan, today_value)
-        return render_template("calendar.html", plan=plan, rows=rows, today=today)
+        return render_template(
+            "calendar.html", plan=plan, rows=rows, today=today, can_export=bool(upcoming_runs(rows, today_value))
+        )
+
+    @app.get("/calendar.ics")
+    def download_calendar():
+        today = date.today()
+        with _state(app) as state:
+            plan = state.active_plan()
+            if not plan:
+                abort(404, "There is no active plan to export.")
+            workouts = upcoming_runs(_workout_rows(state, plan, today), today)
+            if not workouts:
+                abort(404, "There are no upcoming scheduled runs to export.")
+            content = build_calendar(plan, workouts)
+        return Response(
+            content,
+            content_type="text/calendar; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="running-plan-{plan.start_date.isoformat()}.ics"'},
+        )
 
     @app.get("/cleanup")
     def cleanup():
