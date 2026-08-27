@@ -1,14 +1,44 @@
 # Garmin Running Workouts Import
 
-Create structured running workouts from readable YAML, upload them to Garmin Connect, and place them on the Garmin calendar so they sync to a compatible watch. This fork is intentionally running-only; use the upstream project for other sports.
+Create a running plan from your goals and recent activities, then **automatically upload the approved workouts to Garmin
+Connect and schedule them on their planned dates**. Use the web interface or interactive CLI; YAML is available for
+advanced use, not required for normal planning. This fork is intentionally running-only; use the upstream project for
+other sports.
 
 > Garmin does not publish the web endpoints used by this tool. Garmin may change them without notice, and authentication can occasionally require maintenance. This fork uses the actively maintained `garminconnect` client for the current authenticated API.
 
 Current release: **1.3.0** · [Changelog](CHANGELOG.md) · [Release notes](docs/releases/v1.3.0.md)
 
+## From training plan to Garmin Connect and your watch
+
+1. **Plan and review:** define your goal and availability, assess recent running data, and review the proposed block.
+2. **Approve and upload the block:** the tool creates or updates each structured workout in your Garmin Connect
+   workout library and schedules it on the correct Garmin calendar date. Warm-ups, intervals, recoveries, cooldowns,
+   and configured pace or heart-rate targets are included—no need to recreate each workout manually in Garmin Connect.
+3. **Sync and run:** send/sync the scheduled workouts from Garmin Connect to a compatible watch, then select the day's
+   workout from its training calendar. Watch transfer uses Garmin's normal device-sync process; the tool handles the
+   Garmin Connect upload and scheduling. See Garmin's
+   [training-calendar documentation](https://www8.garmin.com/manuals/webhelp/GUID-F41EAFB3-6CC9-42DE-9C6C-9E358DBB0671/EN-US/GUID-F5EB9C7C-A74E-4A26-BFB5-1E6DA4399067.html).
+
+When you approve an adapted plan, the same workflow uploads the replacement and handles the agreed cleanup of obsolete
+upcoming entries. Completed activities stay untouched. The optional `.ics` download is separate: it adds events to
+Apple Calendar or another calendar app, not the structured workouts to Garmin.
+
 ## Screenshots
 
-These examples use a fully synthetic runner profile; they contain no real Garmin credentials or activity data. The calendar deliberately includes completed, missed, current-day, and future workouts so every visual state is represented.
+### Uploaded workouts in Garmin Connect
+
+![Garmin Connect workout library showing uploaded running workouts with dated names, durations, distances, and structured interval previews](docs/images/garmin-connect-uploaded-workouts.png)
+
+The uploaded result in Garmin Connect: easy runs, interval sessions, and long runs with their structured steps. This
+maintainer-provided screenshot shows the **workout library**; the tool also schedules those workouts on the Garmin
+calendar when you apply the plan. The dates and sessions shown are examples, not a suggested plan for every runner.
+
+### Planner web interface
+
+The web-interface examples below use a fully synthetic runner profile; they contain no real Garmin credentials or
+activity data. The calendar deliberately includes completed, missed, current-day, and future workouts so every visual
+state is represented.
 
 ![Web dashboard showing the active running goal, heart-rate guidance, training-block progress, and next workout](docs/images/web-dashboard.jpg)
 
@@ -18,13 +48,15 @@ These examples use a fully synthetic runner profile; they contain no real Garmin
 
 ## Features
 
+- Automated Garmin Connect workout upload **and dated calendar scheduling** for an approved training block, from either
+  the web interface or CLI.
 - Running workouts with warm-up, interval, recovery, rest, cooldown, and other step types.
 - Time, distance, or lap-button step endings.
 - Pace ranges written naturally as `6:00-6:10` or `["6:00", "6:10"]` per kilometre.
 - Heart-rate caps, custom BPM ranges, and Garmin heart-rate zones.
 - Explicit repeat groups.
 - Dated multi-week plans in one YAML file.
-- Preview-first operation: no Garmin login or changes until `--apply` is supplied.
+- Preview-first plan application: uploading and scheduling require explicit approval (`--apply` for YAML plans).
 - Create-or-update by workout name and duplicate-safe calendar scheduling.
 - Preview-first retirement of old plans, including future-calendar cleanup and protected-plan handling.
 - Validation for ISO dates and watch-visible name collisions in the first 15 characters.
@@ -134,6 +166,7 @@ The web dashboard provides:
 - an iCalendar (.ics) download of upcoming scheduled runs for Apple Calendar and other calendar apps;
 - cached Garmin execution scores for completed planned workouts when the activity FIT file provides one;
 - preview-only plan generation and FIT-driven adaptation;
+- approved upload of structured workouts to Garmin Connect and scheduling of the full block on its planned dates;
 - an explicit Garmin conflict inspection and removal decision before application;
 - protected cleanup of duplicates already present in Garmin;
 - a dynamic one-off heart-rate workout builder;
