@@ -50,7 +50,7 @@ These examples use a fully synthetic runner profile; they contain no real Garmin
 Python 3.12-3.14 and [uv](https://docs.astral.sh/uv/) are required.
 
 ```shell
-git clone https://github.com/OWNER/garmin-running-workouts-import.git
+git clone https://github.com/roelsroels/garmin-running-workouts-import.git
 cd garmin-running-workouts-import
 uv sync --dev
 ```
