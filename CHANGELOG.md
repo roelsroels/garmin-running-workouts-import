@@ -5,6 +5,11 @@ All notable changes to Garmin Running Workouts Import are documented here. The p
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-08-27
+
+This release adds Claude explanations, temporary API-key entry, and downloadable calendar events while keeping
+workout planning deterministic and Garmin changes explicitly approved.
+
 ### Added
 
 - Native Claude (Anthropic Messages API) explanations in web and interactive CLI settings, with a configurable model.
