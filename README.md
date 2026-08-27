@@ -160,6 +160,7 @@ The `web` command adds `--host`, `--port`, `--web-debug`, and the local-developm
 
 The web dashboard provides:
 
+- system-aware light and dark themes, with a persistent appearance switch at the top-right;
 - goal, availability, distance/time/pace, planning-period, and constraint forms;
 - independent maximum-BPM, BPM-range, or Garmin-zone targets for every workout phase;
 - current block progress, next workout, and a status-aware calendar with completed, missed, today, and future states;
@@ -172,6 +173,14 @@ The web dashboard provides:
 - a dynamic one-off heart-rate workout builder;
 - Garmin reconnection without storing the password; and
 - optional Claude (Anthropic) and OpenAI-compatible LLM settings, with masked, temporary API-key entry.
+
+### Appearance
+
+The top-right **System / Light / Dark** switch appears on every page. **System** is the default and follows your
+operating system or browser appearance, including changes while the page is open. Choose **Light** or **Dark** to
+override it; the choice is remembered in this browser across visits. Select **System** again to clear the override.
+This preference is local to the browser, not your Garmin account, and does not change the CLI. If browser storage
+is blocked, switching still works for the current page. Without JavaScript, the colours follow the system setting.
 
 ### Calendar status and execution scores
 
