@@ -1,6 +1,7 @@
 from datetime import date, datetime, timedelta
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock
 
+import pytest
 from flask import render_template
 from werkzeug.datastructures import MultiDict
 
@@ -26,6 +27,140 @@ def _csrf(client):
     with client.session_transaction() as session:
         session["csrf_token"] = "test-csrf"
     return "test-csrf"
+
+
+def _save_claude(client, **overrides):
+    return client.post(
+        "/settings/llm",
+        data={
+            "csrf_token": _csrf(client),
+            "llm_provider": "anthropic",
+            **overrides,
+        },
+        follow_redirects=True,
+    )
+
+
+def test_claude_settings_key_stays_out_of_database_cookies_and_html(tmp_path, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    network = Mock(side_effect=AssertionError("Saving must not call the provider"))
+    monkeypatch.setattr("garminworkouts.llm.urllib.request.build_opener", network)
+    app = _app(tmp_path)
+    client = app.test_client()
+    secret = "test-only-claude-secret"
+
+    response = _save_claude(client, llm_api_key=secret)
+
+    assert response.status_code == 200
+    assert b"Claude (Anthropic)" in response.data
+    assert b'type="password" name="llm_api_key"' in response.data
+    assert b"A temporary key is available" in response.data
+    assert b"button.prod.min.js" not in response.data  # No third-party script on credential forms.
+    assert secret.encode() not in response.data
+    assert secret not in str(response.headers)
+    with client.session_transaction() as session:
+        assert secret not in str(dict(session))
+        assert "llm_key_token" in session
+    with AppState(app.config["DATA_DIR"]) as state:
+        assert state.get_setting("llm_provider") == "anthropic"
+        assert state.get_setting("llm_model") == "claude-haiku-4-5-20251001"
+        assert secret not in "\n".join(state.connection.iterdump())
+    assert b"No API key is available" in app.test_client().get("/settings").data
+    assert b"No API key is available" in _app(tmp_path).test_client().get("/settings").data
+    network.assert_not_called()
+
+
+def test_claude_key_is_used_only_for_explicit_explanation_and_plan_is_unchanged(tmp_path, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    opener = MagicMock()
+    opener.open.return_value.__enter__.return_value.read.return_value = (
+        b'{"content":[{"type":"text","text":"Hold your training load steady."}],"stop_reason":"end_turn"}'
+    )
+    monkeypatch.setattr("garminworkouts.llm.urllib.request.build_opener", lambda *args: opener)
+    app = _app(tmp_path)
+    client = app.test_client()
+    record, progress = _seed_calendar_for_export(app)
+    assert _save_claude(client, llm_api_key="test-only-key").status_code == 200
+    opener.open.assert_not_called()
+
+    response = client.post(f"/plans/{record.id}/explain", data={"csrf_token": _csrf(client)})
+
+    assert response.status_code == 302
+    assert opener.open.call_args.args[0].get_header("X-api-key") == "test-only-key"
+    with AppState(app.config["DATA_DIR"]) as state:
+        from garminworkouts.workflows import PlannerWorkflow
+
+        assert PlannerWorkflow(state).load_plan_explanation(record.id) == "Hold your training load steady."
+        assert state.plan(record.id).config == record.config
+        assert state.progress(record.id) == progress
+        assert "test-only-key" not in "\n".join(state.connection.iterdump())
+    other_client = app.test_client()
+    assert other_client.post(f"/plans/{record.id}/explain", data={"csrf_token": _csrf(other_client)}).status_code == 400
+    assert opener.open.call_count == 1
+
+
+def test_llm_environment_key_blank_keep_replace_clear_and_disable(tmp_path, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "environment-test-key")
+    app = _app(tmp_path)
+    client = app.test_client()
+    assert b"service environment" in _save_claude(client).data
+    monkeypatch.delenv("ANTHROPIC_API_KEY")
+    assert _save_claude(client, llm_api_key="test-key-one").status_code == 200
+    assert b"A temporary key is available" in _save_claude(client, llm_api_key="").data
+    with client.session_transaction() as session:
+        first_token = session["llm_key_token"]
+    assert _save_claude(client, llm_api_key="test-key-two").status_code == 200
+    with client.session_transaction() as session:
+        assert session["llm_key_token"] != first_token
+    assert b"No API key is available" in _save_claude(client, clear_llm_key="1").data
+    assert _save_claude(client).status_code == 400
+    assert _save_claude(client, llm_api_key="test-key-three").status_code == 200
+    assert _save_claude(client, llm_provider="none").status_code == 200
+    with client.session_transaction() as session:
+        assert "llm_key_token" not in session
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {},
+        {"llm_api_key": "test\nkey"},
+        {"llm_api_key": "x" * 4097},
+        {"llm_provider": "unknown"},
+        {"llm_api_key_env": "bad variable", "llm_api_key": "test-key"},
+        {"llm_provider": "openai-compatible", "llm_api_key": "test-key"},
+        {
+            "llm_provider": "openai-compatible",
+            "llm_model": "model",
+            "llm_base_url": "http://unsafe.invalid",
+            "llm_api_key": "test-key",
+        },
+    ],
+)
+def test_invalid_llm_settings_do_not_enable_provider(tmp_path, monkeypatch, overrides):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    app = _app(tmp_path)
+    response = _save_claude(app.test_client(), **overrides)
+    assert response.status_code == 400
+    with AppState(app.config["DATA_DIR"]) as state:
+        assert state.get_setting("llm_provider", "none") == "none"
+
+
+def test_changing_provider_never_reuses_previous_temporary_key(tmp_path, monkeypatch):
+    monkeypatch.delenv("RUNNING_PLANNER_LLM_API_KEY", raising=False)
+    app = _app(tmp_path)
+    client = app.test_client()
+    assert _save_claude(client, llm_api_key="claude-only-key").status_code == 200
+    response = _save_claude(client, llm_provider="openai-compatible", llm_model="custom-model")
+    assert response.status_code == 400
+    assert b"claude-only-key" not in response.data
+
+
+def test_llm_settings_requires_csrf_even_for_keys(tmp_path):
+    client = _app(tmp_path).test_client()
+    response = client.post("/settings/llm", data={"llm_provider": "anthropic", "llm_api_key": "test-key"})
+    assert response.status_code == 400
+    assert b"test-key" not in response.data
 
 
 def test_web_dashboard_goal_calendar_and_settings_render(tmp_path):

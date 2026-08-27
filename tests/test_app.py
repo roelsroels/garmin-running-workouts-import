@@ -12,6 +12,51 @@ from garminworkouts.app import (
     _parse_heart_rate_target,
     _parse_pace,
 )
+from garminworkouts.llm import LLMConfig
+from garminworkouts.state import AppState
+
+
+@pytest.mark.parametrize("provider", ["anthropic", "openai-compatible"])
+def test_cli_configures_provider_and_prompts_for_key_without_persisting_it(tmp_path, monkeypatch, provider):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("RUNNING_PLANNER_LLM_API_KEY", raising=False)
+
+    class ScriptedConsole:
+        def __init__(self):
+            self.messages = []
+            self.enabled = True
+
+        def confirm(self, prompt, default=False):
+            return self.enabled
+
+        def choose(self, prompt, options, default=1):
+            assert "Claude (Anthropic)" in options
+            return 2 if provider == "anthropic" else 1
+
+        def ask(self, prompt, default=None):
+            return default or "test-model"
+
+        def secret(self, prompt):
+            assert "hidden" in prompt
+            return "test-only-secret"
+
+        def write(self, message):
+            self.messages.append(message)
+
+    with AppState(tmp_path) as state:
+        console = ScriptedConsole()
+        app = InteractiveApp(state, console)
+        app.configure_llm()
+        config = LLMConfig.from_state(state)
+        assert config.provider == provider
+        assert config.enabled
+        assert app._llm_session_key == (config, "test-only-secret")
+        assert "test-only-secret" not in "\n".join(state.connection.iterdump())
+        assert "test-only-secret" not in str(console.messages)
+        console.enabled = False
+        app.configure_llm()
+        assert app._llm_session_key is None
+        assert not LLMConfig.from_state(state).enabled
 
 
 def test_interactive_input_parsers():

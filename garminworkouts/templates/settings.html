@@ -4,6 +4,26 @@
   <div class="page-heading"><div><p class="eyebrow">Connections</p><h1>Settings</h1><p>Secrets are never written to the planner database. The site itself should remain protected by nginx Basic Authentication.</p></div></div>
   <div class="settings-grid">
     <form class="card form-section" method="post" action="{{ url_for('connect_garmin') }}" data-loading-message="Connecting to Garmin…" data-loading-detail="Waiting for Garmin to authenticate and confirm the session."><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><div class="card-heading"><div><h2>Garmin Connect</h2><p class="muted">Status: {{ 'reusable session available' if values.connected else 'connection required' }}</p></div><span class="status-pill {{ 'safe' if values.connected else 'alert' }}">{{ 'Connected' if values.connected else 'Offline' }}</span></div><label>Username<input type="email" name="garmin_username" value="{{ values.garmin_username }}" autocomplete="username" required></label><label>Password<input type="password" name="garmin_password" autocomplete="current-password" required><small>Used only for this login request and not stored.</small></label><button class="button primary">Connect and test</button></form>
-    <form class="card form-section" method="post" action="{{ url_for('save_llm_settings') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><h2>Optional LLM explanation</h2><label>Provider<select name="llm_provider"><option value="none" {% if values.llm_provider == 'none' %}selected{% endif %}>Disabled</option><option value="openai-compatible" {% if values.llm_provider == 'openai-compatible' %}selected{% endif %}>OpenAI-compatible</option></select></label><label>Base URL<input type="url" name="llm_base_url" value="{{ values.llm_base_url }}"></label><label>Model<input name="llm_model" value="{{ values.llm_model }}"></label><label>API-key environment variable<input name="llm_api_key_env" value="{{ values.llm_api_key_env }}"><small>The API key itself belongs in the systemd environment file, not here.</small></label><button class="button secondary">Save LLM settings</button></form>
+    <form class="card form-section" method="post" action="{{ url_for('save_llm_settings') }}" id="llm-settings" data-provider-defaults='{{ provider_defaults|tojson }}'>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <h2>Optional LLM explanation</h2>
+      <p class="muted">Explain proposals with Claude or an OpenAI-compatible provider. The deterministic planner still creates every workout.</p>
+      <label>Provider
+        <select name="llm_provider" id="llm-provider">
+          <option value="none" {% if values.llm_provider == 'none' %}selected{% endif %}>Disabled</option>
+          <option value="openai-compatible" {% if values.llm_provider == 'openai-compatible' %}selected{% endif %}>OpenAI-compatible</option>
+          <option value="anthropic" {% if values.llm_provider == 'anthropic' %}selected{% endif %}>Claude (Anthropic)</option>
+        </select>
+      </label>
+      <label class="llm-field">Base URL<input type="url" name="llm_base_url" value="{{ values.llm_base_url }}"><small>Claude always uses https://api.anthropic.com/v1. Custom endpoints apply only to OpenAI-compatible providers.</small></label>
+      <label class="llm-field">Model<input name="llm_model" value="{{ values.llm_model }}"><small>Claude defaults to Haiku 4.5; you can enter another Messages API model ID available to your account.</small></label>
+      <label class="llm-field">API key<input type="password" name="llm_api_key" autocomplete="new-password" maxlength="4096" spellcheck="false"><small>Hidden input. Kept only in server memory for this browser session, for up to one hour or until the service restarts. Never saved in SQLite or cookies. Leave blank to keep an available key.</small></label>
+      <p class="help llm-field" id="llm-key-status" role="status">{% if values.llm_session_key %}A temporary key is available for this browser session.{% elif values.llm_environment_key %}An API key is available from the service environment.{% else %}No API key is available. Enter one above or configure the environment variable below.{% endif %} Keys are checked by the provider only when you request an explanation.</p>
+      <label class="consent llm-field"><input type="checkbox" name="clear_llm_key" value="1"><span>Forget this browser's temporary API key<small>This does not remove a key configured in the service environment.</small></span></label>
+      <label class="llm-field">API-key environment variable (optional alternative)<input name="llm_api_key_env" value="{{ values.llm_api_key_env }}"><small>For persistent setup, configure this variable in your protected service environment file. Claude defaults to ANTHROPIC_API_KEY.</small></label>
+      <p class="help">Saving makes no API request. Clicking “Explain this proposal” sends goal details, running summaries, and the plan rationale to the selected provider; API charges may apply.</p>
+      <button class="button secondary">Save LLM settings</button>
+    </form>
   </div>
 {% endblock %}
+{% block support_widget %}<a class="button secondary" href="https://www.buymeacoffee.com/roels" target="_blank" rel="noopener noreferrer">Buy me a beer</a>{% endblock %}

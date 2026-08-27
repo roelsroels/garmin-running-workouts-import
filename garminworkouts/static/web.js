@@ -21,6 +21,29 @@ function refreshGoalFields() {
   });
 }
 
+function refreshLLMFields(providerChanged = false) {
+  const form = document.querySelector("#llm-settings");
+  if (!form) return;
+  const provider = form.elements.llm_provider.value;
+  const defaults = JSON.parse(form.dataset.providerDefaults)[provider];
+  if (providerChanged) {
+    for (const field of ["base_url", "model", "api_key_env"]) {
+      form.elements[`llm_${field}`].value = defaults[field];
+    }
+    // Never carry a typed key across providers/endpoints.
+    form.elements.llm_api_key.value = "";
+    form.elements.clear_llm_key.checked = false;
+    form.querySelector("#llm-key-status").textContent =
+      "Enter a key for this provider, or use its configured environment variable. Availability is checked when you save.";
+  }
+  form.querySelectorAll(".llm-field").forEach((field) => {
+    field.hidden = provider === "none";
+    field.querySelectorAll("input").forEach((input) => { input.disabled = provider === "none"; });
+  });
+  form.elements.llm_base_url.readOnly = provider === "anthropic";
+  form.elements.llm_model.required = provider !== "none";
+}
+
 function showWaitState(form) {
   const overlay = document.querySelector("#wait-overlay");
   if (!overlay) return;
@@ -64,6 +87,7 @@ document.addEventListener("click", (event) => {
 
 document.addEventListener("change", (event) => {
   if (event.target.matches("#goal-type")) refreshGoalFields();
+  if (event.target.matches("#llm-provider")) refreshLLMFields(true);
 });
 
 document.addEventListener("submit", (event) => {
@@ -78,3 +102,4 @@ window.addEventListener("pageshow", hideWaitState);
 
 refreshStepNumbers();
 refreshGoalFields();
+refreshLLMFields();

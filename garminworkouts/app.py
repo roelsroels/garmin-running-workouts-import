@@ -11,7 +11,7 @@ from garminworkouts.garmin.ratelimit import (
     GarminRateLimitError,
     has_reusable_tokens,
 )
-from garminworkouts.llm import LLMConfig, OpenAICompatibleAdvisor
+from garminworkouts.llm import LLMConfig, create_advisor
 from garminworkouts.models.heart_rate import HeartRateRange, validate_heart_rate_zone
 from garminworkouts.models.training_plan import TrainingPlan
 from garminworkouts.plan import PlanApplier
@@ -70,6 +70,7 @@ class InteractiveApp:
         self.console = console or Console()
         self.today = today or date.today()
         self.planner = DeterministicPlanner()
+        self._llm_session_key = None
 
     def run(self):
         self.console.write("Garmin Running Planner")
@@ -481,21 +482,38 @@ class InteractiveApp:
         self.console.write("Garmin connection succeeded; reusable session tokens were stored privately.")
 
     def configure_llm(self):
-        enabled = self.console.confirm("Enable an optional OpenAI-compatible LLM explanation service?", default=False)
+        current = LLMConfig.from_state(self.state)
+        enabled = self.console.confirm("Enable an optional LLM explanation service?", default=current.enabled)
         if not enabled:
             self.state.set_setting("llm_provider", "none")
+            self._llm_session_key = None
             return
-        base_url = self.console.ask("OpenAI-compatible base URL", "https://api.openai.com/v1")
-        model = self.console.ask("Model name")
-        api_key_env = self.console.ask("Environment variable for the API key", "RUNNING_PLANNER_LLM_API_KEY")
-        if not model:
-            raise ValueError("A model name is required when the optional LLM is enabled")
-        self.state.set_setting("llm_provider", "openai-compatible")
-        self.state.set_setting("llm_base_url", base_url)
-        self.state.set_setting("llm_model", model)
-        self.state.set_setting("llm_api_key_env", api_key_env)
+        choice = self.console.choose(
+            "Explanation provider",
+            ["OpenAI-compatible", "Claude (Anthropic)"],
+            default=2 if current.provider == "anthropic" else 1,
+        )
+        provider = "anthropic" if choice == 2 else "openai-compatible"
+        defaults = current if current.provider == provider else LLMConfig(provider=provider)
+        base_url = defaults.base_url
+        if provider == "openai-compatible":
+            base_url = self.console.ask("OpenAI-compatible base URL", defaults.base_url)
+        config = LLMConfig(
+            provider=provider,
+            base_url=base_url,
+            model=self.console.ask("Model name", defaults.model),
+            api_key_env=self.console.ask("Environment variable for the API key", defaults.api_key_env),
+        )
+        config.validate()
+        api_key = os.getenv(config.api_key_env)
+        if not api_key:
+            api_key = self.console.secret("API key (hidden; kept only until the CLI exits)")
+        create_advisor(config, api_key)  # Validate locally; saving makes no paid API request.
+        config.save(self.state)
+        self._llm_session_key = (config, api_key)
         self.console.write(
-            f"LLM settings saved. The API key itself is not stored; set {api_key_env} or enter it when requested."
+            "LLM settings saved. Keys are not written to disk. Asking for an explanation sends the assessment "
+            "to your provider and may incur API charges; workouts remain controlled by the deterministic planner."
         )
 
     def goal_wizard(self, current=None):
@@ -813,15 +831,15 @@ class InteractiveApp:
         }
 
     def _optional_llm_explanation(self, proposal, progress, changes):
-        config = LLMConfig(
-            provider=self.state.get_setting("llm_provider", "none"),
-            base_url=self.state.get_setting("llm_base_url", "https://api.openai.com/v1"),
-            model=self.state.get_setting("llm_model", ""),
-            api_key_env=self.state.get_setting("llm_api_key_env", "RUNNING_PLANNER_LLM_API_KEY"),
-        )
+        config = LLMConfig.from_state(self.state)
         if not config.enabled or not self.console.confirm("Ask the optional LLM to explain this proposal?", False):
             return
-        api_key = os.getenv(config.api_key_env) or self.console.secret("LLM API key (not stored)")
+        session_key = self._llm_session_key
+        api_key = (
+            (session_key[1] if session_key and session_key[0] == config else None)
+            or os.getenv(config.api_key_env)
+            or self.console.secret("LLM API key (not stored)")
+        )
         assessment = {
             "goal": self.state.active_goal().to_dict(),
             "baseline": proposal.baseline.to_dict(),
@@ -829,7 +847,7 @@ class InteractiveApp:
             "rationale": list(proposal.rationale),
             "calendar_changes": changes,
         }
-        explanation = OpenAICompatibleAdvisor(config, api_key).explain(assessment)
+        explanation = create_advisor(config, api_key).explain(assessment)
         self.console.write("Optional LLM explanation")
         self.console.write(explanation)
 

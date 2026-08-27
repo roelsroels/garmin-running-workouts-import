@@ -21,9 +21,11 @@ from garminworkouts.app import (
 )
 from garminworkouts.calendar_export import build_calendar, upcoming_runs
 from garminworkouts.garmin.ratelimit import GarminRateLimitError, has_reusable_tokens
+from garminworkouts.llm import PROVIDER_DEFAULTS, LLMConfig, create_advisor
 from garminworkouts.models.training_plan import TrainingPlan
 from garminworkouts.replanning import mutable_replacement_workouts
 from garminworkouts.state import AppState, Goal
+from garminworkouts.web_secrets import SessionAPIKeys
 from garminworkouts.workflows import GarminAuthenticationRequiredError, PlannerWorkflow
 
 GOAL_TYPES = (
@@ -96,6 +98,7 @@ def create_app(config=None):
     if "APP_BRANCH" not in app.config:
         app.config["APP_BRANCH"] = _application_branch()
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+    llm_keys = SessionAPIKeys()
 
     @app.before_request
     def verify_csrf():
@@ -295,7 +298,9 @@ def create_app(config=None):
             record = state.plan(plan_id)
             if not record:
                 abort(404)
-            PlannerWorkflow(state).explain_plan(record)
+            config = LLMConfig.from_state(state)
+            api_key = llm_keys.get(session.get("llm_key_token"), config)
+            PlannerWorkflow(state).explain_plan(record, api_key=api_key)
         return redirect(
             url_for(
                 "review_plan",
@@ -442,15 +447,18 @@ def create_app(config=None):
     @app.get("/settings")
     def settings():
         with _state(app) as state:
+            config = LLMConfig.from_state(state)
             values = {
                 "garmin_username": state.get_setting("garmin_username", ""),
                 "connected": has_reusable_tokens(state.tokens_dir),
-                "llm_provider": state.get_setting("llm_provider", "none"),
-                "llm_base_url": state.get_setting("llm_base_url", "https://api.openai.com/v1"),
-                "llm_model": state.get_setting("llm_model", ""),
-                "llm_api_key_env": state.get_setting("llm_api_key_env", "RUNNING_PLANNER_LLM_API_KEY"),
+                "llm_provider": config.provider,
+                "llm_base_url": config.base_url,
+                "llm_model": config.model,
+                "llm_api_key_env": config.api_key_env,
+                "llm_session_key": bool(llm_keys.get(session.get("llm_key_token"), config)),
+                "llm_environment_key": config.enabled and bool(os.getenv(config.api_key_env)),
             }
-        return render_template("settings.html", values=values)
+        return render_template("settings.html", values=values, provider_defaults=PROVIDER_DEFAULTS)
 
     @app.post("/settings/garmin")
     def connect_garmin():
@@ -464,18 +472,32 @@ def create_app(config=None):
 
     @app.post("/settings/llm")
     def save_llm_settings():
-        provider = request.form.get("llm_provider", "none")
-        if provider not in {"none", "openai-compatible"}:
-            raise ValueError("Unsupported LLM provider")
-        model = request.form.get("llm_model", "").strip()
-        if provider != "none" and not model:
-            raise ValueError("A model name is required when LLM explanations are enabled")
+        config = LLMConfig(
+            provider=request.form.get("llm_provider", "none"),
+            base_url=request.form.get("llm_base_url", ""),
+            model=request.form.get("llm_model", ""),
+            api_key_env=request.form.get("llm_api_key_env", ""),
+        )
+        config.validate()
+        token = session.get("llm_key_token")
+        if _checked("clear_llm_key") or not config.enabled:
+            llm_keys.remove(token)
+            session.pop("llm_key_token", None)
+        entered_key = request.form.get("llm_api_key", "").strip() if config.enabled else ""
+        if len(entered_key) > 4096:
+            raise ValueError("The API key is too long")
+        if config.enabled:
+            api_key = entered_key or llm_keys.get(token, config) or os.getenv(config.api_key_env)
+            if api_key:
+                create_advisor(config, api_key)  # Validation only, never a paid API call on save.
+            elif not _checked("clear_llm_key"):
+                raise ValueError("Enter an API key or configure the selected environment variable first")
         with _state(app) as state:
-            state.set_setting("llm_provider", provider)
-            state.set_setting("llm_base_url", request.form.get("llm_base_url", "").strip())
-            state.set_setting("llm_model", model)
-            state.set_setting("llm_api_key_env", request.form.get("llm_api_key_env", "").strip())
-        flash("Optional LLM settings were saved; no API key was stored.", "success")
+            config.save(state)
+        if entered_key:
+            llm_keys.remove(token)
+            session["llm_key_token"] = llm_keys.put(config, entered_key)
+        flash("LLM settings saved. Entered keys stay in server memory for up to one hour, never on disk.", "success")
         return redirect(url_for("settings"))
 
     return app

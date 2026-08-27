@@ -7,9 +7,17 @@ All notable changes to Garmin Running Workouts Import are documented here. The p
 
 ### Added
 
+- Native Claude (Anthropic Messages API) explanations in web and interactive CLI settings, with a configurable model.
+- Masked web API-key entry with browser-scoped, one-hour server-memory storage, a forget-key option, and environment-key
+  fallback. Keys are never written to SQLite, browser cookies, or application files; saving makes no paid API request.
 - The web footer now shows the running application version and Git branch for quick deployment identification.
 - The full calendar now offers an offline .ics download of upcoming scheduled runs as all-day events for Apple Calendar
   and other calendar apps, including workout instructions and stable event IDs for repeated exports of the same plan.
+
+### Security
+
+- LLM requests no longer expose provider error bodies or follow redirects with API credentials. Remote custom endpoints
+  require HTTPS; the Settings page does not load the third-party support widget on credential forms.
 
 ## [1.2.1] - 2026-08-24
 

@@ -8,7 +8,7 @@ from garminworkouts.activities import ActivityArchive, ActivitySummary, Assessme
 from garminworkouts.fit_analysis import FitAnalyzer
 from garminworkouts.garmin.garminclient import GarminClient
 from garminworkouts.garmin.ratelimit import GarminRateLimiter, GarminRateLimitError, has_reusable_tokens
-from garminworkouts.llm import LLMConfig, OpenAICompatibleAdvisor
+from garminworkouts.llm import LLMConfig, create_advisor
 from garminworkouts.models.training_plan import TrainingPlan
 from garminworkouts.plan import PlanApplier
 from garminworkouts.planner import DeterministicPlanner, write_plan
@@ -219,18 +219,13 @@ class PlannerWorkflow:
             "retirement": retirement_actions,
         }
 
-    def explain_plan(self, record):
-        config = LLMConfig(
-            provider=self.state.get_setting("llm_provider", "none"),
-            base_url=self.state.get_setting("llm_base_url", "https://api.openai.com/v1"),
-            model=self.state.get_setting("llm_model", ""),
-            api_key_env=self.state.get_setting("llm_api_key_env", "RUNNING_PLANNER_LLM_API_KEY"),
-        )
+    def explain_plan(self, record, api_key=None):
+        config = LLMConfig.from_state(self.state)
         if not config.enabled:
             raise ValueError("Enable an optional LLM explanation provider in Settings first")
-        api_key = os.getenv(config.api_key_env)
+        api_key = api_key or os.getenv(config.api_key_env)
         if not api_key:
-            raise ValueError(f"Set {config.api_key_env} in the web service environment first")
+            raise ValueError(f"Enter an API key in Settings or set {config.api_key_env} in the service environment")
         old_record = self.state.plan(record.supersedes_plan_id) if record.supersedes_plan_id else None
         assessment = {
             "goal": record.config.get("metadata", {}).get("goal", {}),
@@ -248,9 +243,11 @@ class PlannerWorkflow:
                 else []
             ),
         }
-        explanation = OpenAICompatibleAdvisor(config, api_key).explain(assessment)
+        explanation = create_advisor(config, api_key).explain(assessment)
         self._write_private_json(self._plan_explanation_path(record.id), {"explanation": explanation})
-        self.state.record_event("plan-explained-from-web", {"plan_id": record.id, "model": config.model})
+        self.state.record_event(
+            "plan-explained-from-web", {"plan_id": record.id, "provider": config.provider, "model": config.model}
+        )
         return explanation
 
     def load_plan_explanation(self, plan_id):

@@ -138,7 +138,7 @@ The web dashboard provides:
 - protected cleanup of duplicates already present in Garmin;
 - a dynamic one-off heart-rate workout builder;
 - Garmin reconnection without storing the password; and
-- optional provider-neutral LLM settings without storing an API key.
+- optional Claude (Anthropic) and OpenAI-compatible LLM settings, with masked, temporary API-key entry.
 
 ### Calendar status and execution scores
 
@@ -500,7 +500,43 @@ The software automates Garmin access, recent-activity selection, original FIT do
 
 Training decisions use the declared goal, demonstrated recent frequency, duration and long-run exposure, and available days. Free-text constraints are retained and displayed for human review; the planner does not attempt to interpret arbitrary medical, injury, or coaching instructions. With insufficient history, the engine lowers its confidence, caps initial frequency, and substitutes familiar easy running for narrow quality targets. The result is always shown as a reviewable proposal. Garmin receives that fixed proposal only after confirmation; Garmin and the watch do not rewrite subsequent sessions themselves.
 
-An optional OpenAI-compatible LLM can explain an adaptation in plain language. It does not create or silently alter workout definitions, and the normal planner works fully without it. The configured base URL and model are portable settings; the API key is supplied at runtime and is not stored by this application.
+An optional Claude (Anthropic) or OpenAI-compatible LLM can explain an adaptation in plain language. It does not create
+or silently alter workout definitions, and the normal planner works fully without it. Provider, model, and endpoint
+settings are portable; API keys are supplied at runtime and never written to SQLite or application files.
+
+#### Enable Claude explanations
+
+1. In the web interface, open **Settings → Optional LLM explanation** and select **Claude (Anthropic)**.
+2. Keep the default model (`claude-haiku-4-5-20251001`) or enter another Claude Messages API model ID available to your
+   account. The native Claude endpoint is fixed to `https://api.anthropic.com/v1`.
+3. Paste your Anthropic API key into the masked **API key** field and click **Save LLM settings**. Saving validates
+   settings locally; it does not contact Anthropic or verify that the key has account access.
+4. Open a plan proposal and click **Explain this proposal**. This is the step that sends the assessment to the provider
+   and can incur API charges. Authentication, model-access, quota, and connection errors are shown without exposing
+   the key or raw provider response. Failed requests are not automatically retried.
+
+The entered web key is held only in server memory, scoped to that browser session and the saved LLM configuration.
+It expires after one hour, is lost on a service restart, and is not placed in browser cookies or rendered back into
+the page. Leave the field blank to retain an available key. Use **Forget this browser's temporary API key** to clear
+it, or select **Disabled**. Switching provider or other connection settings requires a matching key again. The Settings
+page uses a plain support link instead of loading the third-party footer widget on credential forms.
+
+For a persistent setup, put `ANTHROPIC_API_KEY` in the protected environment file used by your web service and restart
+the service. Keep **API-key environment variable** set to `ANTHROPIC_API_KEY`, and leave the key input blank. An entered
+temporary key takes precedence over the environment. Forgetting a temporary key does not unset an environment key.
+The in-memory option assumes the documented **single-worker** deployment; use an environment key for multiple workers.
+The web app remains single-runner/shared-state software behind authentication, not a multi-user account service.
+
+The interactive CLI offers the same choice under **Garmin connection and optional LLM settings → Configure optional
+LLM**. It prompts for a hidden key if the configured environment variable is absent and keeps an entered key only until
+the CLI exits. Existing OpenAI-compatible configurations remain supported, including local HTTP endpoints on loopback;
+remote endpoints must use HTTPS.
+
+Explanations send goal details (including free-text constraints), running summaries, rationale, and proposed calendar
+changes to the selected provider—not Garmin credentials or original FIT files. The explanation is saved locally with
+the plan. Only request it if you agree to share that assessment; normal planning and Garmin scheduling need no LLM key.
+See Anthropic's [Messages API reference](https://platform.claude.com/docs/en/api/messages/create) and
+[model documentation](https://platform.claude.com/docs/en/models/overview) for API access and model IDs.
 
 ### Scope and evidence boundary
 
