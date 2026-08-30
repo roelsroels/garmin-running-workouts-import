@@ -549,6 +549,8 @@ def test_calendar_shows_execution_score_for_completed_run(tmp_path):
     assert b'aria-label="Actual distance 12.35 kilometres"' in response.data
     assert b">12.35 km</span>" in response.data
     assert response.data.index(b"Execution score 92%") < response.data.index(b"12.35 km")
+    styles = app.test_client().get("/static/web.css").data
+    assert b".execution-score.good + .actual-distance" in styles
 
 
 def _seed_calendar_for_export(app):
