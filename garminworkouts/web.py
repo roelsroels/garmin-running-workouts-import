@@ -518,6 +518,7 @@ def _workout_rows(state, plan, today):
         if inferred_missed:
             status = "missed"
         execution_score = row.get("execution_score")
+        actual_distance_m = row.get("actual_distance_m")
         if execution_score is None:
             execution_score_band = "unavailable"
         elif execution_score >= 67:
@@ -536,6 +537,7 @@ def _workout_rows(state, plan, today):
                 "execution_score": execution_score,
                 "execution_score_checked": bool(row.get("execution_score_checked_at")),
                 "execution_score_band": execution_score_band,
+                "actual_distance_km": actual_distance_m / 1000 if actual_distance_m is not None else None,
             }
         )
     return rows

@@ -36,12 +36,13 @@ def _config():
     }
 
 
-def _activity(activity_id, activity_date, execution_score=None, execution_score_checked=False):
+def _activity(activity_id, activity_date, execution_score=None, execution_score_checked=False, distance_m=None):
     return ActivitySummary(
         str(activity_id),
         "Run",
         datetime.combine(activity_date, datetime.min.time()),
         "running",
+        distance_m=distance_m,
         execution_score=execution_score,
         execution_score_checked=execution_score_checked,
     )
@@ -70,18 +71,27 @@ def test_state_persists_goal_plan_and_progress(tmp_path):
         }
 
 
-def test_state_persists_execution_score_and_checked_state(tmp_path):
+def test_state_persists_completed_activity_metrics(tmp_path):
     with AppState(tmp_path / "state") as state:
         goal = state.save_goal(_goal())
         plan = state.save_plan(goal, _config(), tmp_path / "plan.yaml", "moderate", ["Reason"])
         progress = state.refresh_progress(
             plan.id,
-            [_activity(1, date(2030, 1, 8), execution_score=88, execution_score_checked=True)],
+            [
+                _activity(
+                    1,
+                    date(2030, 1, 8),
+                    execution_score=88,
+                    execution_score_checked=True,
+                    distance_m=10342,
+                )
+            ],
             today=date(2030, 1, 9),
         )
 
         assert progress[0]["execution_score"] == 88
         assert progress[0]["execution_score_checked_at"] is not None
+        assert progress[0]["actual_distance_m"] == 10342
 
 
 def test_state_migrates_existing_progress_table_for_execution_scores(tmp_path):
@@ -107,7 +117,7 @@ def test_state_migrates_existing_progress_table_for_execution_scores(tmp_path):
     with AppState(state_dir) as state:
         columns = {row["name"] for row in state.connection.execute("PRAGMA table_info(plan_progress)")}
 
-    assert {"execution_score", "execution_score_checked_at"} <= columns
+    assert {"actual_distance_m", "execution_score", "execution_score_checked_at"} <= columns
 
 
 def test_new_active_goal_retires_previous_goal(tmp_path):

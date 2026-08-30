@@ -7,7 +7,7 @@ from pathlib import Path
 
 from garminworkouts.models.heart_rate import HeartRateRange, validate_heart_rate_zone
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 HEART_RATE_PHASES = {"warmup", "easy", "long", "quality", "recovery"}
 
@@ -223,6 +223,7 @@ class AppState:
                 workout_name TEXT NOT NULL,
                 status TEXT NOT NULL,
                 activity_id TEXT,
+                actual_distance_m REAL,
                 execution_score REAL,
                 execution_score_checked_at TEXT,
                 updated_at TEXT NOT NULL,
@@ -244,6 +245,8 @@ class AppState:
             self.connection.execute("ALTER TABLE plan_progress ADD COLUMN execution_score REAL")
         if "execution_score_checked_at" not in progress_columns:
             self.connection.execute("ALTER TABLE plan_progress ADD COLUMN execution_score_checked_at TEXT")
+        if "actual_distance_m" not in progress_columns:
+            self.connection.execute("ALTER TABLE plan_progress ADD COLUMN actual_distance_m REAL")
         self.set_setting("schema_version", str(SCHEMA_VERSION))
         self.connection.commit()
 
@@ -371,7 +374,8 @@ class AppState:
             activities_by_date.setdefault(activity.date.isoformat(), activity)
         rows = self.connection.execute(
             """
-            SELECT workout_date, workout_name, activity_id, execution_score, execution_score_checked_at
+            SELECT workout_date, workout_name, activity_id, actual_distance_m,
+                   execution_score, execution_score_checked_at
             FROM plan_progress WHERE plan_id = ? ORDER BY workout_date
             """,
             (plan_id,),
@@ -385,6 +389,13 @@ class AppState:
                     status = "completed"
                     activity_id = activity.activity_id
                     same_activity = row["activity_id"] == activity_id
+                    actual_distance_m = (
+                        activity.distance_m
+                        if activity.distance_m is not None
+                        else row["actual_distance_m"]
+                        if same_activity
+                        else None
+                    )
                     execution_score = (
                         activity.execution_score
                         if activity.execution_score is not None
@@ -402,22 +413,26 @@ class AppState:
                 elif workout_date < today:
                     status = "missed"
                     activity_id = None
+                    actual_distance_m = None
                     execution_score = None
                     execution_score_checked_at = None
                 else:
                     status = "scheduled"
                     activity_id = None
+                    actual_distance_m = None
                     execution_score = None
                     execution_score_checked_at = None
                 self.connection.execute(
                     """
                     UPDATE plan_progress
-                    SET status = ?, activity_id = ?, execution_score = ?, execution_score_checked_at = ?, updated_at = ?
+                    SET status = ?, activity_id = ?, actual_distance_m = ?, execution_score = ?,
+                        execution_score_checked_at = ?, updated_at = ?
                     WHERE plan_id = ? AND workout_date = ? AND workout_name = ?
                     """,
                     (
                         status,
                         activity_id,
+                        actual_distance_m,
                         execution_score,
                         execution_score_checked_at,
                         now,
@@ -431,7 +446,8 @@ class AppState:
     def progress(self, plan_id):
         rows = self.connection.execute(
             """
-            SELECT workout_date, workout_name, status, activity_id, execution_score, execution_score_checked_at
+            SELECT workout_date, workout_name, status, activity_id, actual_distance_m,
+                   execution_score, execution_score_checked_at
             FROM plan_progress WHERE plan_id = ? ORDER BY workout_date, workout_name
             """,
             (plan_id,),

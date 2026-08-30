@@ -524,6 +524,7 @@ def test_calendar_shows_execution_score_for_completed_run(tmp_path):
         "Scored intervals",
         datetime.combine(workout_date, datetime.min.time()),
         "running",
+        distance_m=12345.67,
         execution_score=92,
         execution_score_checked=True,
     )
@@ -545,6 +546,9 @@ def test_calendar_shows_execution_score_for_completed_run(tmp_path):
     assert response.status_code == 200
     assert b"Execution score 92%" in response.data
     assert b"execution-score good" in response.data
+    assert b'aria-label="Actual distance 12.35 kilometres"' in response.data
+    assert b">12.35 km</span>" in response.data
+    assert response.data.index(b"Execution score 92%") < response.data.index(b"12.35 km")
 
 
 def _seed_calendar_for_export(app):

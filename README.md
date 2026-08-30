@@ -165,7 +165,7 @@ The web dashboard provides:
 - independent maximum-BPM, BPM-range, or Garmin-zone targets for every workout phase;
 - current block progress, next workout, and a status-aware calendar with completed, missed, today, and future states;
 - an iCalendar (.ics) download of upcoming scheduled runs for Apple Calendar and other calendar apps;
-- cached Garmin execution scores for completed planned workouts when the activity FIT file provides one;
+- cached actual distances and Garmin execution scores for completed planned workouts;
 - preview-only plan generation and FIT-driven adaptation;
 - approved upload of structured workouts to Garmin Connect and scheduling of the full block on its planned dates;
 - an explicit Garmin conflict inspection and removal decision before application;
@@ -192,6 +192,10 @@ The CLI and web calendar use the same local progress state:
 - **Scheduled** identifies later workouts that remain in the active block.
 
 For a completed planned run, the tool displays Garmin's workout execution score when Garmin recorded one. If the normal activity summary does not include it, the refresh workflow downloads that activity's original FIT file once, reads the score, and caches both the value and the checked state in SQLite. Later page loads do not download the activity again.
+
+The actual recorded distance is stored from the matched Garmin activity and shown in kilometres beside the execution
+score. After upgrading an existing installation, run **Refresh completed activities** once to populate distances for
+completed workouts that were already in the local calendar history.
 
 Garmin describes this score as adherence to the targets of a structured workout, not as a general fitness, effort, recovery, or health score. Garmin only calculates it for workouts with heart-rate, speed, pace, or power targets. The interface uses Garmin's documented bands: **good** 67–100%, **average** 34–66%, and **low** 0–33%. A completed run can legitimately show **Execution score unavailable** when no supported target or score was recorded. See Garmin's [workout execution score documentation](https://www8.garmin.com/manuals/webhelp/GUID-69467D38-DE67-4A49-A78A-F7C809EFF8B5/EN-US/MARQ_Athlete_%28Gen_2%29_OM_EN-US.pdf).
 

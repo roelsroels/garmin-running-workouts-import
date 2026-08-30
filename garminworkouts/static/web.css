@@ -216,11 +216,13 @@ label small { color: var(--muted); font-weight: 400; line-height: 1.4; }
 .schedule-row.status-missed { border-color: var(--border-danger); background: var(--missed-bg); }
 .schedule-row.status-missed .status-pill { filter: none; font-weight: 750; }
 .schedule-row.is-inferred-missed .status-pill::after { content: ""; width: 5px; height: 5px; margin-left: .45rem; border-radius: 50%; background: currentColor; }
-.execution-score { display: inline-flex; margin-top: .55rem; padding: .2rem .55rem; border: 1px solid var(--line); border-radius: 999px; font-size: .72rem; font-weight: 800; letter-spacing: .02em; }
+.completion-metrics { display: flex; align-items: center; flex-wrap: wrap; gap: .35rem; margin-top: .55rem; }
+.execution-score, .actual-distance { display: inline-flex; padding: .2rem .55rem; border: 1px solid var(--line); border-radius: 999px; font-size: .72rem; font-weight: 800; letter-spacing: .02em; }
 .execution-score.good { color: var(--mint); border-color: var(--border-good); }
 .execution-score.average { color: var(--amber); border-color: var(--border-warning); }
 .execution-score.low { color: var(--red); border-color: var(--border-danger); }
 .execution-score.unavailable { color: var(--muted); }
+.actual-distance { color: var(--muted); font-variant-numeric: tabular-nums; }
 .schedule-row.is-next-action { border-color: var(--mint); background: var(--next-bg); box-shadow: 0 0 0 1px var(--focus-ring), 0 12px 30px var(--shadow); }
 .schedule-row.is-next-action::before { content: "Next"; color: var(--on-accent); background: var(--mint); border-radius: 999px; padding: .22rem .55rem; font-size: .68rem; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; }
 .rationale, .compact-list { color: var(--muted); line-height: 1.6; padding-left: 1.2rem; }

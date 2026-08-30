@@ -31,7 +31,7 @@
           <div>
             <strong>{{ workout.name }}</strong>
             <p>{{ workout.description }}</p>
-            {% if workout.status == 'completed' %}<span class="execution-score {{ workout.execution_score_band|default('unavailable') }}">{% if workout.execution_score is defined and workout.execution_score is not none %}Execution score {{ workout.execution_score|int }}%{% elif workout.execution_score_checked|default(false) %}Execution score unavailable{% else %}Execution score pending refresh{% endif %}</span>{% endif %}
+            {% if workout.status == 'completed' %}<div class="completion-metrics"><span class="execution-score {{ workout.execution_score_band|default('unavailable') }}">{% if workout.execution_score is defined and workout.execution_score is not none %}Execution score {{ workout.execution_score|int }}%{% elif workout.execution_score_checked|default(false) %}Execution score unavailable{% else %}Execution score pending refresh{% endif %}</span>{% if workout.actual_distance_km is defined and workout.actual_distance_km is not none %}<span class="actual-distance" aria-label="Actual distance {{ '%.2f'|format(workout.actual_distance_km) }} kilometres">{{ '%.2f'|format(workout.actual_distance_km) }} km</span>{% endif %}</div>{% endif %}
           </div>
           <span class="status-pill {{ workout.status }}">{{ status_label }}</span>
         </article>
