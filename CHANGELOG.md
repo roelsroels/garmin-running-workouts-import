@@ -10,6 +10,11 @@ All notable changes to Garmin Running Workouts Import are documented here. The p
 - Completed runs in the web calendar and proposal history show the actual recorded distance in kilometres beside
   Garmin's execution score. Existing databases migrate automatically and populate prior distances on the next refresh.
 
+### Changed
+
+- Refreshed the anonymized README gallery to show the current dashboard, completed-distance pills, and both light and
+  dark calendar themes; the HR workout-builder example now demonstrates dark mode.
+
 ## [1.4.0] - 2026-08-27
 
 The web interface now follows your system appearance, with an optional light or dark override on every page.

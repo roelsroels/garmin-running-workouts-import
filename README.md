@@ -37,14 +37,17 @@ calendar when you apply the plan. The dates and sessions shown are examples, not
 ### Planner web interface
 
 The web-interface examples below use a fully synthetic runner profile; they contain no real Garmin credentials or
-activity data. The calendar deliberately includes completed, missed, current-day, and future workouts so every visual
-state is represented.
+activity data. The calendar deliberately includes completed runs with execution scores and actual distances, a missed
+run, today's next workout, and future workouts. The top-right appearance control follows the system by default and also
+offers persistent Light and Dark overrides.
 
-![Web dashboard showing the active running goal, heart-rate guidance, training-block progress, and next workout](docs/images/web-dashboard.jpg)
+![Light-mode web dashboard showing the appearance selector, active running goal, heart-rate guidance, block progress, next workout, and planner actions](docs/images/web-dashboard.jpg)
 
-| Status-aware training calendar | Heart-rate workout builder |
+| Light calendar | Dark calendar |
 | --- | --- |
-| ![Training calendar showing completed runs with execution scores, missed runs, today's next workout, and future scheduled runs](docs/images/web-calendar.jpg) | ![Heart-rate workout builder with sequential time and maximum-BPM steps](docs/images/web-heart-rate-workout.jpg) |
+| ![Light-mode training calendar showing completed runs with execution scores and actual distances, a missed run, today's next workout, and future scheduled runs](docs/images/web-calendar.jpg) | ![Dark-mode training calendar showing completed runs with execution scores and actual distances, a missed run, today's next workout, and future scheduled runs](docs/images/web-calendar-dark.jpg) |
+
+![Dark-mode heart-rate workout builder with sequential time and maximum-BPM steps](docs/images/web-heart-rate-workout.jpg)
 
 ## Features
 
@@ -65,7 +68,7 @@ state is represented.
 - Local decoding of FIT files with Garmin's official FIT SDK.
 - An interactive, goal-driven planner: no YAML editing is required for normal use.
 - A dashboard with the active goal, completed/missed/remaining days, and the next workout.
-- A date-aware calendar that subdues finished dates, identifies missed runs, highlights today's workout, and keeps the next actionable run obvious.
+- A date-aware calendar that subdues finished dates, identifies missed runs, shows actual completed distances, highlights today's workout, and keeps the next actionable run obvious.
 - Garmin workout execution scores for completed planned runs, fetched once from original FIT data when necessary and cached locally.
 - Supervised mid-block adaptation that replaces only future workouts after explicit approval.
 - Garmin-side overlap detection with explicit consent to retire pre-existing schedules and obsolete templates.
@@ -73,6 +76,7 @@ state is represented.
 - Interactive heart-rate caps, custom ranges, and Garmin zones by workout phase.
 - A one-off HR workout builder for arbitrary sequential steps without YAML.
 - A responsive, preview-first web dashboard backed by the same planner, state, Garmin client, and FIT evidence.
+- System-aware light and dark web themes with a persistent top-right appearance override.
 - A deterministic planning engine that works without an LLM, plus optional provider-neutral LLM explanations.
 - Portable SQLite state and file-based session tokens; no macOS Keychain dependency.
 - Versioned YAML/JSON artifacts suitable for future desktop and mobile clients.
