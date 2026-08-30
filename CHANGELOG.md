@@ -5,6 +5,11 @@ All notable changes to Garmin Running Workouts Import are documented here. The p
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-08-30
+
+Completed calendar entries now pair Garmin's execution score with the actual recorded distance, and the README gallery
+reflects the current light and dark interfaces.
+
 ### Added
 
 - Completed runs in the web calendar and proposal history show the actual recorded distance in kilometres beside
