@@ -20,12 +20,13 @@ from garminworkouts.app import (
     _parse_pace,
 )
 from garminworkouts.calendar_export import build_calendar, upcoming_runs
+from garminworkouts.garmin.garminclient import GarminAuthenticationError, GarminTokenPersistenceError
 from garminworkouts.garmin.ratelimit import GarminRateLimitError, has_reusable_tokens
 from garminworkouts.llm import PROVIDER_DEFAULTS, LLMConfig, create_advisor
 from garminworkouts.models.training_plan import TrainingPlan
 from garminworkouts.replanning import mutable_replacement_workouts
 from garminworkouts.state import AppState, Goal
-from garminworkouts.web_secrets import SessionAPIKeys
+from garminworkouts.web_secrets import PendingGarminLogins, SessionAPIKeys
 from garminworkouts.workflows import GarminAuthenticationRequiredError, PlannerWorkflow
 
 GOAL_TYPES = (
@@ -99,6 +100,7 @@ def create_app(config=None):
         app.config["APP_BRANCH"] = _application_branch()
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
     llm_keys = SessionAPIKeys()
+    pending_garmin_logins = PendingGarminLogins()
 
     @app.before_request
     def verify_csrf():
@@ -462,12 +464,83 @@ def create_app(config=None):
 
     @app.post("/settings/garmin")
     def connect_garmin():
+        previous_token = session.pop("garmin_mfa_token", None)
+        pending_garmin_logins.remove(previous_token)
+        username = request.form.get("garmin_username")
         with _state(app) as state:
-            PlannerWorkflow(state).connect_garmin(
-                request.form.get("garmin_username"),
+            pending = PlannerWorkflow(state).begin_garmin_login(
+                username,
                 request.form.get("garmin_password"),
             )
+        if pending:
+            session["garmin_mfa_token"] = pending_garmin_logins.put(username, pending)
+            return redirect(url_for("garmin_mfa"))
         flash("Garmin Connect authentication succeeded; reusable tokens were stored privately.", "success")
+        return redirect(url_for("settings"))
+
+    @app.get("/settings/garmin/mfa")
+    def garmin_mfa():
+        token = session.get("garmin_mfa_token")
+        pending = pending_garmin_logins.get(token)
+        if not pending:
+            session.pop("garmin_mfa_token", None)
+            flash("The Garmin verification request expired. Enter the password to start again.", "warning")
+            return redirect(url_for("settings"))
+        username, _connection, attempts = pending
+        return render_template("garmin_mfa.html", username=username, attempts=attempts)
+
+    @app.post("/settings/garmin/mfa")
+    def complete_garmin_mfa():
+        token = session.get("garmin_mfa_token")
+        pending = pending_garmin_logins.get(token)
+        if not pending:
+            session.pop("garmin_mfa_token", None)
+            flash("The Garmin verification request expired. Enter the password to start again.", "warning")
+            return redirect(url_for("settings"))
+        username, connection, _attempts = pending
+        try:
+            with _state(app) as state:
+                PlannerWorkflow(state).complete_garmin_login(
+                    username,
+                    connection,
+                    request.form.get("garmin_mfa_code"),
+                )
+        except GarminRateLimitError:
+            pending_garmin_logins.remove(token)
+            session.pop("garmin_mfa_token", None)
+            raise
+        except GarminTokenPersistenceError:
+            pending_garmin_logins.remove(token)
+            session.pop("garmin_mfa_token", None)
+            raise
+        except GarminAuthenticationError as error:
+            remaining = pending_garmin_logins.record_failure(token)
+            if not remaining:
+                session.pop("garmin_mfa_token", None)
+                flash("The Garmin verification request ended. Enter the password to start again.", "warning")
+                return redirect(url_for("settings"))
+            return (
+                render_template(
+                    "garmin_mfa.html",
+                    username=username,
+                    attempts=remaining,
+                    error=str(error),
+                ),
+                400,
+            )
+        except Exception:
+            pending_garmin_logins.remove(token)
+            session.pop("garmin_mfa_token", None)
+            raise
+        pending_garmin_logins.remove(token)
+        session.pop("garmin_mfa_token", None)
+        flash("Garmin verification succeeded; reusable tokens were stored privately.", "success")
+        return redirect(url_for("settings"))
+
+    @app.post("/settings/garmin/mfa/cancel")
+    def cancel_garmin_mfa():
+        pending_garmin_logins.remove(session.pop("garmin_mfa_token", None))
+        flash("The pending Garmin verification request was cancelled.", "warning")
         return redirect(url_for("settings"))
 
     @app.post("/settings/llm")

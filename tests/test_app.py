@@ -59,6 +59,63 @@ def test_cli_configures_provider_and_prompts_for_key_without_persisting_it(tmp_p
         assert not LLMConfig.from_state(state).enabled
 
 
+def test_cli_garmin_login_prompts_for_mfa_only_when_requested(tmp_path, monkeypatch):
+    class ScriptedConsole:
+        def __init__(self):
+            self.secrets = []
+            self.messages = []
+
+        def ask(self, prompt, default=None):
+            return "runner@example.test"
+
+        def secret(self, prompt):
+            self.secrets.append(prompt)
+            return "123456" if "verification" in prompt.casefold() else "test-password"
+
+        def write(self, message=""):
+            self.messages.append(message)
+
+    captured = {}
+
+    class MFAClient:
+        def __init__(self, username, password, token_store, rate_limiter=None, prompt_mfa=None):
+            captured.update(
+                username=username,
+                password=password,
+                token_store=token_store,
+                prompt_mfa=prompt_mfa,
+            )
+
+        def __enter__(self):
+            captured["code"] = captured["prompt_mfa"]()
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def list_recent_activities(self, limit):
+            captured["limit"] = limit
+
+    monkeypatch.setattr("garminworkouts.app.GarminClient", MFAClient)
+    with AppState(tmp_path) as state:
+        console = ScriptedConsole()
+        app = InteractiveApp(state, console)
+        app.configure_garmin()
+
+        assert captured["username"] == "runner@example.test"
+        assert captured["password"] == "test-password"
+        assert captured["code"] == "123456"
+        assert captured["limit"] == 1
+        assert console.secrets == [
+            "Garmin password (not stored)",
+            "Garmin verification code (not stored)",
+        ]
+        persisted = "\n".join(state.connection.iterdump())
+        assert "test-password" not in persisted
+        assert "123456" not in persisted
+        assert "123456" not in str(console.messages)
+
+
 def test_interactive_input_parsers():
     assert _parse_clock("55:00") == 3300
     assert _parse_clock("1:05:00") == 3900

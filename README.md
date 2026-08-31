@@ -114,7 +114,7 @@ Start the CLI without a command:
 
 On first use, the wizard asks only for the information needed to construct a plan:
 
-1. Garmin Connect username. The password is requested with hidden input only when login is needed and is never saved by the application.
+1. Garmin Connect username. The password is requested with hidden input only when login is needed and is never saved by the application. If Garmin requires two-factor authentication, the CLI then requests the one-time code with another hidden prompt.
 2. A measurable primary goal, start date, planning period (four weeks by default), available running days, long-run day, and current constraints.
 3. Whether optional LLM explanations should be enabled. The planner itself does not require an LLM.
 4. Whether to fetch recent Garmin history, generate a proposal, and review it before scheduling.
@@ -172,6 +172,7 @@ The web dashboard provides:
 - cached actual distances and Garmin execution scores for completed planned workouts;
 - preview-only plan generation and FIT-driven adaptation;
 - approved upload of structured workouts to Garmin Connect and scheduling of the full block on its planned dates;
+- two-stage Garmin login when an account requires an authenticator, email, or SMS verification code;
 - an explicit Garmin conflict inspection and removal decision before application;
 - protected cleanup of duplicates already present in Garmin;
 - a dynamic one-off heart-rate workout builder;
@@ -316,6 +317,21 @@ scripts/publish-server-change "Update the planner interface"
 
 The helper refuses known credential, database, token, FIT, archive, and personal-plan paths. It cannot recognize every possible secret, so the displayed staged diff remains the final safety check.
 
+### Garmin two-factor authentication
+
+Normal password and reusable-token logins behave as before. When Garmin explicitly requests an additional verification code:
+
+- the interactive CLI pauses and requests the one-time code using hidden terminal input;
+- the web interface redirects to a dedicated verification page after the password step;
+- the pending web login is scoped to that browser, kept only in server memory, expires after five minutes, and allows at most three code attempts;
+- the password is discarded from the pending client as soon as Garmin issues the challenge;
+- neither the password nor verification code is written to SQLite, the token directory, logs, or the browser cookie;
+- after successful verification, reusable Garmin session tokens are saved normally so later runs do not repeatedly request MFA.
+
+The web MFA exchange needs the same in-memory Garmin client for both requests. Keep the documented single Gunicorn worker. A service restart, another worker, expiration, cancellation, or three rejected codes ends the pending login; enter the password again to start a fresh one.
+
+Unattended commands cannot safely answer an unexpected MFA prompt. Establish reusable tokens first through `./garmin-workouts` or the protected web settings page. Garmin authentication mechanisms are private and can change without notice.
+
 ### Garmin rate limiting
 
 Garmin Connect uses private, unpublished endpoints and may return HTTP 429 when an account or IP address sends too many requests. The client handles this conservatively:
@@ -341,6 +357,8 @@ GARMIN_LOGIN_STRATEGY=mobile+requests
 ```
 
 Supported single login strategies are `mobile+requests`, `mobile+cffi`, `widget+cffi`, `portal+cffi`, and `portal+requests`. Keep the default unless it cannot authenticate in your environment.
+
+MFA and rate limiting are separate outcomes. An MFA verification request displays the code form; HTTP 429 activates the cooldown and is not treated as a code request. If Garmin rate-limits the verification itself, the pending login is discarded and the same cooldown rules apply.
 
 ## Preview a four-week plan
 
@@ -839,7 +857,7 @@ At the end of the block—or earlier if sessions are repeatedly incomplete, unex
 - The interactive workflow never persists Garmin or LLM passwords/API keys; protect the portable state directory because session tokens remain sensitive.
 - If legacy automation uses `.env`, protect it with local file permissions and rotate any credential that may have been exposed.
 - Do not run an unattended cloud job containing Garmin credentials.
-- Garmin's private endpoints, MFA, CAPTCHA, or SSO changes can break authentication.
+- Authenticator, email, and SMS verification codes are supported, but Garmin's private endpoints, CAPTCHA, or future SSO/MFA changes can still break authentication.
 - Applying and retiring plans are designed to be repeatable, but Garmin's private endpoint behavior can change; always review previews and verify the calendar after synchronization.
 
 ## Development

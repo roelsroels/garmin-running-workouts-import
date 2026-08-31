@@ -1,9 +1,47 @@
 from datetime import date
+from unittest.mock import MagicMock
 
 import pytest
 
 from garminworkouts.state import AppState, Goal
 from garminworkouts.workflows import PlannerWorkflow
+
+
+def test_workflow_web_login_preserves_normal_flow_and_defers_only_mfa(tmp_path, monkeypatch):
+    ordinary = MagicMock(mfa_required=False)
+    mfa = MagicMock(mfa_required=True)
+    clients = iter((ordinary, mfa))
+    constructor = MagicMock(side_effect=lambda *_args, **_kwargs: next(clients))
+    monkeypatch.setattr("garminworkouts.workflows.GarminClient", constructor)
+
+    with AppState(tmp_path / "state") as state:
+        workflow = PlannerWorkflow(state)
+        assert workflow.begin_garmin_login("runner@example.test", "password") is None
+        assert state.get_setting("garmin_username") == "runner@example.test"
+        assert workflow.begin_garmin_login("mfa@example.test", "password") is mfa
+        assert state.get_setting("garmin_username") == "runner@example.test"
+
+    ordinary.open.assert_called_once_with()
+    ordinary.list_recent_activities.assert_called_once_with(1)
+    ordinary.close.assert_called_once_with()
+    mfa.open.assert_called_once_with()
+    mfa.list_recent_activities.assert_not_called()
+    mfa.close.assert_not_called()
+    assert all(call.kwargs["defer_mfa"] for call in constructor.call_args_list)
+
+
+def test_workflow_completes_mfa_before_recording_connection(tmp_path):
+    connection = MagicMock(mfa_required=False)
+
+    with AppState(tmp_path / "state") as state:
+        workflow = PlannerWorkflow(state)
+        workflow.complete_garmin_login("runner@example.test", connection, "123456")
+        assert state.get_setting("garmin_username") == "runner@example.test"
+        assert state.get_setting("garmin_token_store") == str(state.tokens_dir)
+
+    connection.resume_mfa.assert_called_once_with("123456")
+    connection.list_recent_activities.assert_called_once_with(1)
+    connection.close.assert_called_once_with()
 
 
 def test_workflow_conflict_choice_requires_removal_or_duplicate_acknowledgement():

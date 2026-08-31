@@ -61,6 +61,46 @@ class PlannerWorkflow:
             rate_limiter=rate_limiter,
         ) as connection:
             connection.list_recent_activities(1)
+        self._record_garmin_connection(username)
+
+    def begin_garmin_login(self, username, password):
+        """Start a web login and return a live client only when Garmin requests MFA."""
+        username = str(username or "").strip()
+        password = str(password or "")
+        if not username or not password:
+            raise ValueError("Both Garmin username and password are required")
+        rate_limiter = GarminRateLimiter(self.state.tokens_dir)
+        rate_limiter.check_cooldown()
+        connection = GarminClient(
+            username,
+            password,
+            str(self.state.tokens_dir),
+            rate_limiter=rate_limiter,
+            defer_mfa=True,
+        )
+        try:
+            connection.open()
+            if connection.mfa_required:
+                return connection
+            connection.list_recent_activities(1)
+        except Exception:
+            connection.close()
+            raise
+        connection.close()
+        self._record_garmin_connection(username)
+        return None
+
+    def complete_garmin_login(self, username, connection, code):
+        """Complete a pending web MFA challenge and verify the resulting session."""
+        try:
+            connection.resume_mfa(code)
+            connection.list_recent_activities(1)
+        finally:
+            if not connection.mfa_required:
+                connection.close()
+        self._record_garmin_connection(username)
+
+    def _record_garmin_connection(self, username):
         self.state.set_setting("garmin_username", username)
         self.state.set_setting("garmin_token_store", str(self.state.tokens_dir))
         self.state.record_event("garmin-connected-from-web", {"username": username})

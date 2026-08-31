@@ -5,6 +5,17 @@ All notable changes to Garmin Running Workouts Import are documented here. The p
 
 ## [Unreleased]
 
+### Added
+
+- Garmin two-factor authentication for interactive CLI and web logins. The web flow keeps a browser-scoped pending
+  session in server memory for five minutes, limits code attempts, discards the password after the challenge, and
+  persists only the resulting reusable Garmin tokens.
+
+### Changed
+
+- Authentication failures now show safe, actionable messages while Garmin HTTP 429 responses continue to use the
+  existing persistent cooldown. Normal password and reusable-token login paths remain unchanged.
+
 ## [1.4.1] - 2026-08-30
 
 Completed calendar entries now pair Garmin's execution score with the actual recorded distance, and the README gallery

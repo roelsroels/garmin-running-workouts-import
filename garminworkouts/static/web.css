@@ -186,6 +186,7 @@ h2 { font-size: 1.3rem; letter-spacing: -.025em; }
 
 .form-stack { display: grid; gap: 1rem; }
 .form-section { display: grid; gap: 1rem; }
+.narrow-card { max-width: 44rem; margin-inline: auto; }
 .field-grid { display: grid; gap: 1rem; }
 .field-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .field-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }

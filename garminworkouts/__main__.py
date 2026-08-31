@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import getpass
 import glob
 import json
 import logging
@@ -19,7 +20,7 @@ from garminworkouts.activities import (
 )
 from garminworkouts.config import configreader
 from garminworkouts.fit_analysis import FitAnalyzer
-from garminworkouts.garmin.garminclient import GarminClient
+from garminworkouts.garmin.garminclient import GarminAuthenticationError, GarminClient, GarminMFARequiredError
 from garminworkouts.garmin.ratelimit import GarminRateLimitError, has_reusable_tokens
 from garminworkouts.models.running_workout import RunningWorkout
 from garminworkouts.models.training_plan import TrainingPlan
@@ -329,7 +330,16 @@ def _garmin_client(args):
         username=args.username,
         password=args.password,
         token_store=args.token_store,
+        prompt_mfa=_prompt_garmin_mfa,
     )
+
+
+def _prompt_garmin_mfa():
+    if not sys.stdin.isatty():
+        raise GarminMFARequiredError(
+            "Garmin requires a verification code; reconnect from an interactive terminal or the web settings page."
+        )
+    return getpass.getpass("Garmin verification code (not stored): ").strip()
 
 
 def _running_workout_from_config(config):
@@ -510,6 +520,8 @@ def main():
         else:
             parser.print_help()
     except GarminRateLimitError as exc:
+        parser.exit(2, f"{exc}\n")
+    except GarminAuthenticationError as exc:
         parser.exit(2, f"{exc}\n")
 
 

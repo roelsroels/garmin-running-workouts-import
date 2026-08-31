@@ -6,8 +6,12 @@ from flask import render_template
 from werkzeug.datastructures import MultiDict
 
 from garminworkouts.activities import ActivitySummary
+from garminworkouts.garmin.garminclient import GarminAuthenticationError
+from garminworkouts.garmin.ratelimit import GarminRateLimitError
 from garminworkouts.state import AppState, Goal
 from garminworkouts.web import create_app
+from garminworkouts.web_secrets import PendingGarminLogins
+from garminworkouts.workflows import PlannerWorkflow
 
 
 def _app(tmp_path):
@@ -39,6 +43,161 @@ def _save_claude(client, **overrides):
         },
         follow_redirects=True,
     )
+
+
+def test_web_garmin_login_without_mfa_keeps_existing_success_flow(tmp_path, monkeypatch):
+    calls = []
+
+    def begin(_workflow, username, password):
+        calls.append((username, password))
+        return None
+
+    monkeypatch.setattr(PlannerWorkflow, "begin_garmin_login", begin)
+    client = _app(tmp_path).test_client()
+    response = client.post(
+        "/settings/garmin",
+        data={
+            "csrf_token": _csrf(client),
+            "garmin_username": "runner@example.test",
+            "garmin_password": "test-password",
+        },
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"authentication succeeded" in response.data
+    assert calls == [("runner@example.test", "test-password")]
+    with client.session_transaction() as browser_session:
+        assert "garmin_mfa_token" not in browser_session
+        assert "test-password" not in str(dict(browser_session))
+
+
+def test_web_garmin_mfa_is_browser_scoped_and_completes_without_storing_secrets(tmp_path, monkeypatch):
+    connection = MagicMock()
+    monkeypatch.setattr(PlannerWorkflow, "begin_garmin_login", lambda *_args: connection)
+    completed = []
+
+    def complete(_workflow, username, pending, code):
+        completed.append((username, pending, code))
+
+    monkeypatch.setattr(PlannerWorkflow, "complete_garmin_login", complete)
+    app = _app(tmp_path)
+    client = app.test_client()
+    response = client.post(
+        "/settings/garmin",
+        data={
+            "csrf_token": _csrf(client),
+            "garmin_username": "runner@example.test",
+            "garmin_password": "test-password",
+        },
+    )
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/settings/garmin/mfa")
+    page = client.get(response.headers["Location"])
+    assert page.status_code == 200
+    assert b"Two-factor authentication" in page.data
+    assert b"runner@example.test" in page.data
+    assert b"3 attempts remaining" in page.data
+    assert b"button.prod.min.js" not in page.data
+    assert b"test-password" not in page.data
+    with client.session_transaction() as browser_session:
+        assert browser_session.get("garmin_mfa_token")
+        assert "test-password" not in str(dict(browser_session))
+
+    response = client.post(
+        "/settings/garmin/mfa",
+        data={"csrf_token": _csrf(client), "garmin_mfa_code": "123456"},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"verification succeeded" in response.data
+    assert completed == [("runner@example.test", connection, "123456")]
+    connection.close.assert_called_once_with()
+    with client.session_transaction() as browser_session:
+        assert "garmin_mfa_token" not in browser_session
+        assert "123456" not in str(dict(browser_session))
+
+
+def test_web_garmin_mfa_allows_bounded_retry_then_expires(tmp_path, monkeypatch):
+    connection = MagicMock()
+    monkeypatch.setattr(PlannerWorkflow, "begin_garmin_login", lambda *_args: connection)
+
+    def reject(_workflow, _username, _pending, _code):
+        raise GarminAuthenticationError("Garmin rejected the verification code. Check the latest code and try again.")
+
+    monkeypatch.setattr(PlannerWorkflow, "complete_garmin_login", reject)
+    client = _app(tmp_path).test_client()
+    client.post(
+        "/settings/garmin",
+        data={
+            "csrf_token": _csrf(client),
+            "garmin_username": "runner@example.test",
+            "garmin_password": "test-password",
+        },
+    )
+
+    for remaining in (2, 1):
+        response = client.post(
+            "/settings/garmin/mfa",
+            data={"csrf_token": _csrf(client), "garmin_mfa_code": "wrong"},
+        )
+        assert response.status_code == 400
+        assert f"{remaining} attempt".encode() in response.data
+        connection.close.assert_not_called()
+
+    response = client.post(
+        "/settings/garmin/mfa",
+        data={"csrf_token": _csrf(client), "garmin_mfa_code": "wrong"},
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert b"verification request ended" in response.data
+    connection.close.assert_called_once_with()
+    with client.session_transaction() as browser_session:
+        assert "garmin_mfa_token" not in browser_session
+
+
+def test_web_garmin_mfa_rate_limit_uses_cooldown_and_drops_pending_login(tmp_path, monkeypatch):
+    connection = MagicMock()
+    monkeypatch.setattr(PlannerWorkflow, "begin_garmin_login", lambda *_args: connection)
+
+    def rate_limited(_workflow, _username, _pending, _code):
+        raise GarminRateLimitError(2_000_000_000)
+
+    monkeypatch.setattr(PlannerWorkflow, "complete_garmin_login", rate_limited)
+    client = _app(tmp_path).test_client()
+    client.post(
+        "/settings/garmin",
+        data={
+            "csrf_token": _csrf(client),
+            "garmin_username": "runner@example.test",
+            "garmin_password": "test-password",
+        },
+    )
+    response = client.post(
+        "/settings/garmin/mfa",
+        data={"csrf_token": _csrf(client), "garmin_mfa_code": "123456"},
+    )
+
+    assert response.status_code == 429
+    assert b"cooldown" in response.data
+    connection.close.assert_called_once_with()
+    with client.session_transaction() as browser_session:
+        assert "garmin_mfa_token" not in browser_session
+
+
+def test_pending_garmin_login_expires_in_memory(monkeypatch):
+    clock = iter((100.0, 100.0, 100.0, 401.0))
+    monkeypatch.setattr("garminworkouts.web_secrets.time.monotonic", lambda: next(clock))
+    connection = MagicMock()
+    pending = PendingGarminLogins(ttl=300)
+
+    token = pending.put("runner@example.test", connection)
+    assert pending.get(token)[:2] == ("runner@example.test", connection)
+    assert pending.get(token) is None
+    connection.close.assert_called_once_with()
 
 
 def test_claude_settings_key_stays_out_of_database_cookies_and_html(tmp_path, monkeypatch):

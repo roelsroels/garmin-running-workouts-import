@@ -477,9 +477,14 @@ class InteractiveApp:
             password,
             str(self.state.tokens_dir),
             rate_limiter=rate_limiter,
+            prompt_mfa=self._prompt_garmin_mfa,
         ) as connection:
             connection.list_recent_activities(1)
         self.console.write("Garmin connection succeeded; reusable session tokens were stored privately.")
+
+    def _prompt_garmin_mfa(self):
+        self.console.write("Garmin requires a verification code for this login.")
+        return self.console.secret("Garmin verification code (not stored)")
 
     def configure_llm(self):
         current = LLMConfig.from_state(self.state)
@@ -695,7 +700,13 @@ class InteractiveApp:
         rate_limiter.check_cooldown()
         if not password and not has_reusable_tokens(token_path):
             password = self.console.secret("Garmin password (not stored)")
-        return GarminClient(username, password, token_store, rate_limiter=rate_limiter)
+        return GarminClient(
+            username,
+            password,
+            token_store,
+            rate_limiter=rate_limiter,
+            prompt_mfa=self._prompt_garmin_mfa,
+        )
 
     def _refresh_if_possible(self):
         if not self.state.active_plan() or not has_reusable_tokens(self.state.tokens_dir):

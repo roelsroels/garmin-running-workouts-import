@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Verify Garmin login · Running Planner{% endblock %}
+{% block content %}
+  <div class="page-heading"><div><p class="eyebrow">Garmin Connect</p><h1>Enter the verification code</h1><p>Garmin requested an additional verification step for {{ username }}.</p></div></div>
+  <section class="card form-section narrow-card">
+    <div class="card-heading"><div><h2>Two-factor authentication</h2><p class="muted">Use the newest code from your authenticator app, email, or SMS message.</p></div><span class="status-pill alert">Verification required</span></div>
+    {% if error %}<div class="notice error" role="alert">{{ error }}</div>{% endif %}
+    <form method="post" action="{{ url_for('complete_garmin_mfa') }}" data-loading-message="Verifying with Garmin…" data-loading-detail="Submitting the one-time code and saving reusable session tokens.">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>Verification code<input type="password" name="garmin_mfa_code" autocomplete="one-time-code" inputmode="numeric" maxlength="32" spellcheck="false" autofocus required><small>{{ attempts }} attempt{% if attempts != 1 %}s{% endif %} remaining. The code is used only for this request and is never stored.</small></label>
+      <button class="button primary">Verify and connect</button>
+    </form>
+    <form method="post" action="{{ url_for('cancel_garmin_mfa') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button class="button secondary">Cancel and start again</button>
+    </form>
+    <p class="help">This pending login exists only in server memory for five minutes. Closing or restarting the service cancels it. A Garmin rate-limit response still activates the normal cooldown instead of retrying.</p>
+  </section>
+{% endblock %}
+{% block support_widget %}<a class="button secondary" href="https://www.buymeacoffee.com/roels" target="_blank" rel="noopener noreferrer">Buy me a beer</a>{% endblock %}

@@ -1,6 +1,7 @@
 import os
+from pathlib import Path
 
-from garminconnect import GarminConnectTooManyRequestsError
+from garminconnect import GarminConnectAuthenticationError, GarminConnectTooManyRequestsError
 
 from garminworkouts.garmin.ratelimit import GarminRateLimiter
 
@@ -13,30 +14,101 @@ LOGIN_STRATEGIES = {
 }
 
 
+class GarminAuthenticationError(ValueError):
+    """A safe, user-facing Garmin authentication failure."""
+
+
+class GarminMFARequiredError(GarminAuthenticationError):
+    """Garmin requires a one-time code but this login cannot prompt for one."""
+
+
+class GarminTokenPersistenceError(GarminAuthenticationError):
+    """Garmin authenticated, but the resulting reusable tokens were not saved."""
+
+
 class GarminClient:
-    def __init__(self, username, password, token_store, rate_limiter=None):
+    def __init__(
+        self,
+        username,
+        password,
+        token_store,
+        rate_limiter=None,
+        prompt_mfa=None,
+        defer_mfa=False,
+    ):
         self.username = username
         self.password = password
         self.token_store = token_store
         self.rate_limiter = rate_limiter or GarminRateLimiter(token_store)
+        self.prompt_mfa = prompt_mfa
+        self.defer_mfa = defer_mfa
+        self.session = None
+        self.mfa_required = False
 
     def __enter__(self):
+        self.open()
+        if self.mfa_required:
+            self.close()
+            raise GarminMFARequiredError(
+                "Garmin requires a verification code. Use the interactive CLI or web login to enter it."
+            )
+        return self
+
+    def open(self):
         from garminconnect import Garmin
 
         self.rate_limiter.before_request()
-        self.session = Garmin(self.username, self.password)
+        options = {}
+        if self.prompt_mfa is not None:
+            options["prompt_mfa"] = self.prompt_mfa
+        if self.defer_mfa:
+            options["return_on_mfa"] = True
+        self.session = Garmin(self.username, self.password, **options)
         self._configure_login_strategy()
         try:
-            self.session.login(tokenstore=self.token_store)
+            result = self.session.login(tokenstore=None if self.defer_mfa else self.token_store)
         except Exception as exc:
-            self.session = None
+            self.close()
             self._raise_if_rate_limited(exc)
+            self._raise_if_authentication_failed(exc)
             raise
+        self.mfa_required = bool(result and result[0] == "needs_mfa")
+        if self.mfa_required:
+            self._discard_password()
+            return self
+        if self.defer_mfa:
+            self._discard_password()
+            try:
+                self._persist_tokens()
+            except Exception:
+                self.close()
+                raise
         self.rate_limiter.record_success()
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+
+    def close(self):
         self.session = None
+
+    def resume_mfa(self, code):
+        code = str(code or "").strip()
+        if not self.session or not self.mfa_required:
+            raise GarminAuthenticationError("The Garmin verification request is no longer active")
+        if not code or len(code) > 32 or any(character.isspace() for character in code):
+            raise GarminAuthenticationError("Enter the verification code supplied by Garmin")
+        self.rate_limiter.before_request()
+        try:
+            self.session.resume_login({}, code)
+            self._persist_tokens()
+        except Exception as exc:
+            self._raise_if_rate_limited(exc)
+            self._raise_if_authentication_failed(exc, mfa=True)
+            raise
+        self.mfa_required = False
+        self.rate_limiter.record_success()
+        return self
 
     def list_workouts(self, batch_size=100):
         start_index = 0
@@ -123,6 +195,40 @@ class GarminClient:
     def _raise_if_rate_limited(self, error):
         if _is_rate_limited(error):
             raise self.rate_limiter.record_rate_limited(error) from error
+
+    def _raise_if_authentication_failed(self, error, mfa=False):
+        if not isinstance(error, GarminConnectAuthenticationError):
+            return
+        message = str(error).casefold()
+        if "mfa required" in message:
+            raise GarminMFARequiredError(
+                "Garmin requires a verification code. Use the interactive CLI or web login to enter it."
+            ) from error
+        if mfa or "mfa" in message or "verification code" in message:
+            raise GarminAuthenticationError(
+                "Garmin rejected the verification code. Check the latest code and try again."
+            ) from error
+        raise GarminAuthenticationError(
+            "Garmin rejected the login. Check the account name and password, then try again."
+        ) from error
+
+    def _persist_tokens(self):
+        client = getattr(self.session, "client", None)
+        if client is None or not hasattr(client, "dump"):
+            raise GarminTokenPersistenceError("Garmin authenticated, but reusable session tokens could not be saved")
+        token_store = str(Path(self.token_store).expanduser().resolve())
+        client._tokenstore_path = token_store
+        try:
+            client.dump(token_store)
+        except Exception as error:
+            raise GarminTokenPersistenceError(
+                "Garmin authenticated, but reusable session tokens could not be saved"
+            ) from error
+
+    def _discard_password(self):
+        self.password = None
+        if self.session is not None and hasattr(self.session, "password"):
+            self.session.password = None
 
 
 def _is_rate_limited(error):
