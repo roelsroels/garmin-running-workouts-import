@@ -459,14 +459,15 @@ class AppState:
         return self._summarize_progress(rows)
 
     def block_progress(self, plan_id):
-        """Return current progress plus the elapsed portion of superseded plans."""
+        """Return progress for one block, including elapsed rows from its adaptations."""
         current = self.plan(plan_id)
         if current is None:
             return []
         rows = self.progress(plan_id)
         combined = {(row["workout_date"], row["workout_name"]): row for row in rows}
         cutoff = min((date.fromisoformat(row["workout_date"]) for row in rows), default=current.start_date)
-        parent_id = current.supersedes_plan_id
+        metadata = current.config.get("metadata", {})
+        parent_id = None if metadata.get("continued_from_plan_id") else current.supersedes_plan_id
         while parent_id:
             parent = self.plan(parent_id)
             if parent is None:
@@ -480,8 +481,23 @@ class AppState:
                     inherited_dates.append(workout_date)
             if inherited_dates:
                 cutoff = min(cutoff, min(inherited_dates))
+            if parent.config.get("metadata", {}).get("continued_from_plan_id"):
+                break
             parent_id = parent.supersedes_plan_id
         return sorted(combined.values(), key=lambda row: (row["workout_date"], row["workout_name"]))
+
+    def block_lineage(self, plan_id):
+        """Return newest-to-oldest plan records belonging to the same training block."""
+        records = []
+        current = self.plan(plan_id)
+        visited = set()
+        while current and current.id not in visited:
+            visited.add(current.id)
+            records.append(current)
+            if current.config.get("metadata", {}).get("continued_from_plan_id"):
+                break
+            current = self.plan(current.supersedes_plan_id) if current.supersedes_plan_id else None
+        return records
 
     def block_progress_summary(self, plan_id):
         return self._summarize_progress(self.block_progress(plan_id))

@@ -313,6 +313,105 @@ def test_workflow_enables_finished_template_cleanup_when_applying_next_block(tmp
         assert state.active_plan().id == proposal.id
 
 
+def test_workflow_one_time_cleanup_includes_all_previous_block_revisions(tmp_path):
+    today = date(2030, 1, 10)
+
+    def config(name, workout_date, workout_name, metadata=None):
+        return {
+            "name": name,
+            "metadata": metadata or {},
+            "workouts": [
+                {
+                    "date": workout_date.isoformat(),
+                    "sport": "running",
+                    "name": workout_name,
+                    "steps": [{"type": "interval", "duration": "30:00"}],
+                }
+            ],
+        }
+
+    connection = MagicMock()
+    connection.list_workouts.return_value = [
+        {
+            "workoutId": 101,
+            "workoutName": "Old elapsed",
+            "sportType": {"sportTypeId": 1, "sportTypeKey": "running"},
+        },
+        {
+            "workoutId": 102,
+            "workoutName": "Old final",
+            "sportType": {"sportTypeId": 1, "sportTypeKey": "running"},
+        },
+        {
+            "workoutId": 103,
+            "workoutName": "Current",
+            "sportType": {"sportTypeId": 1, "sportTypeKey": "running"},
+        },
+    ]
+    connection.list_scheduled_workouts.return_value = {"calendarItems": []}
+    managed = MagicMock()
+    managed.__enter__.return_value = connection
+
+    with AppState(tmp_path / "state") as state:
+        goal = state.save_goal(
+            Goal(
+                goal_type="complete_distance",
+                description="Complete ten kilometres",
+                start_date=today,
+                target_distance_km=10,
+            )
+        )
+        original = state.save_plan(
+            goal,
+            config("Original", date(2030, 1, 1), "Old elapsed"),
+            state.plans_dir / "original.yaml",
+            "moderate",
+            (),
+        )
+        revision = state.save_plan(
+            goal,
+            config("Revision", date(2030, 1, 5), "Old final"),
+            state.plans_dir / "revision.yaml",
+            "moderate",
+            (),
+            supersedes_plan_id=original.id,
+        )
+        current = state.save_plan(
+            goal,
+            config(
+                "Current block",
+                date(2030, 1, 12),
+                "Current",
+                {"continued_from_plan_id": revision.id},
+            ),
+            state.plans_dir / "current.yaml",
+            "moderate",
+            (),
+            supersedes_plan_id=revision.id,
+        )
+        state.activate_plan(current.id)
+        workflow = PlannerWorkflow(state, today=today)
+        workflow.garmin_client = MagicMock(return_value=managed)
+
+        record, previous, preview = workflow.inspect_previous_block_templates()
+        actions = workflow.clean_previous_block_templates(record, preview)
+
+        assert previous.id == revision.id
+        assert preview["summary"]["workout_templates_to_delete"] == 2
+        assert {item["name"] for item in preview["workouts"] if item["action"] == "delete"} == {
+            "Old elapsed",
+            "Old final",
+        }
+        assert [item["action"] for item in actions] == [
+            "deleted-workout-template",
+            "deleted-workout-template",
+        ]
+        assert state.block_progress_summary(current.id)["completed"] == 0
+
+    assert {call.args[0] for call in connection.delete_workout.call_args_list} == {101, 102}
+    connection.unschedule_workout.assert_not_called()
+
+
 def test_workflow_rejects_stale_replacement_with_immutable_dates_before_garmin(tmp_path):
     old_config = {
         "name": "Old",

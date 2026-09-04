@@ -2,6 +2,21 @@ from collections import defaultdict
 from datetime import date
 
 from garminworkouts.models.running_workout import RunningWorkout
+from garminworkouts.models.training_plan import TrainingPlan
+
+
+def combined_training_plan(records, name="Training block"):
+    """Combine a block's plan revisions, preferring the newest definition of each workout name."""
+    workouts = []
+    seen_names = set()
+    for record in records:
+        for workout in record.config.get("workouts", []):
+            workout_name = str(workout.get("name", ""))
+            if not workout_name or workout_name in seen_names:
+                continue
+            seen_names.add(workout_name)
+            workouts.append(workout)
+    return TrainingPlan({"name": name, "workouts": workouts})
 
 
 class ScheduledConflictCleanup:
@@ -264,6 +279,13 @@ class PlanRetirement:
                 }
             )
 
+        actions.extend(self.apply_templates(report))
+        return actions
+
+    def apply_templates(self, preview=None):
+        """Delete only workout-library templates selected by a retirement preview."""
+        report = preview or self.preview()
+        actions = []
         for item in report["workouts"]:
             if item["action"] != "delete":
                 continue

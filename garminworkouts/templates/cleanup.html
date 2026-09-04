@@ -1,15 +1,39 @@
 {% extends "base.html" %}
-{% block title %}Schedule cleanup · Running Planner{% endblock %}
+{% block title %}Garmin cleanup · Running Planner{% endblock %}
 {% block content %}
-  <div class="page-heading"><div><p class="eyebrow">Duplicate control</p><h1>Clean Garmin schedule overlaps</h1><p>The active local plan is the version to protect. Only other running workouts on its dates are candidates.</p></div></div>
+  <div class="page-heading"><div><p class="eyebrow">Protected cleanup</p><h1>Clean Garmin Connect</h1><p>The active local plan is always protected. Inspect the exact candidates before approving any removal.</p></div></div>
   {% if not plan %}
     <section class="card"><h2>No active plan</h2><p class="muted">Apply a plan before using protected cleanup.</p></section>
-  {% elif preview is none %}
-    <section class="approval-box"><div><h2>Inspect {{ plan.name }}</h2><p>This read-only check compares the active plan with Garmin’s calendar.</p></div><form method="post" action="{{ url_for('inspect_cleanup') }}" data-loading-message="Checking Garmin’s calendar…" data-loading-detail="Comparing scheduled runs without making changes."><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button primary">Inspect Garmin schedule</button></form></section>
   {% else %}
-    {% include "conflict_form.html" %}
-    {% if preview.summary.overlapping_calendar_entries %}
-      <form class="approval-box vertical" method="post" action="{{ url_for('apply_cleanup') }}" data-loading-message="Cleaning the Garmin schedule…" data-loading-detail="Removing only the reviewed calendar conflicts. Completed activities remain untouched."><input type="hidden" name="csrf_token" value="{{ csrf_token }}">{% if preview.summary.obsolete_template_candidates %}<label class="consent"><input type="checkbox" name="delete_templates" value="1"><span><strong>Also delete {{ preview.summary.obsolete_template_candidates }} old workout template(s)</strong><small>Calendar entries will be removed either way. Completed activities are unaffected.</small></span></label>{% endif %}<button class="button danger" {% if preview.summary.unresolved_calendar_entries %}disabled{% endif %}>Remove listed calendar conflicts</button></form>
+    <section class="card">
+      <p class="eyebrow">Workout library</p>
+      <h2>Previous finished block</h2>
+      {% if previous_plan %}
+        <p class="muted">Find obsolete workout templates from {{ previous_plan.start_date.strftime('%d %b') }} – {{ previous_plan.end_date.strftime('%d %b %Y') }}. The active block, completed activities, FIT evidence, and calendar history remain protected.</p>
+        {% if obsolete_preview is none %}
+          <form method="post" action="{{ url_for('inspect_obsolete_cleanup') }}" data-loading-message="Inspecting old workouts…" data-loading-detail="Comparing the finished block with the active workout library without making changes."><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button primary">Inspect previous-block workouts</button></form>
+        {% else %}
+          {% set obsolete_count = obsolete_preview.summary.workout_templates_to_delete %}
+          <p><strong>{{ obsolete_count }} obsolete workout template{{ '' if obsolete_count == 1 else 's' }} found.</strong></p>
+          {% if obsolete_count %}
+            <div class="conflict-list">{% for item in obsolete_preview.workouts if item.action == 'delete' %}<div><strong>{{ item.name }}</strong><span>delete template</span></div>{% endfor %}</div>
+            <form class="approval-box vertical" method="post" action="{{ url_for('apply_obsolete_cleanup') }}" data-loading-message="Cleaning the workout library…" data-loading-detail="Deleting only the reviewed obsolete templates. Completed activities remain untouched."><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label class="consent warning"><input type="checkbox" name="confirm_obsolete_cleanup" value="1"><span><strong>Delete these {{ obsolete_count }} obsolete template{{ '' if obsolete_count == 1 else 's' }}</strong><small>This does not delete completed activities, FIT evidence, execution scores, or the active block.</small></span></label><button class="button danger">Delete obsolete templates</button></form>
+          {% else %}
+            <p class="muted">Nothing needs removal. The one-time cleanup has already been completed or no obsolete templates remain.</p>
+          {% endif %}
+        {% endif %}
+      {% else %}
+        <p class="muted">There is no finished predecessor block requiring one-time workout-library cleanup.</p>
+      {% endif %}
+    </section>
+
+    {% if preview is none %}
+      <section class="approval-box"><div><p class="eyebrow">Calendar</p><h2>Inspect schedule overlaps</h2><p>This read-only check compares the active plan with Garmin’s calendar.</p></div><form method="post" action="{{ url_for('inspect_cleanup') }}" data-loading-message="Checking Garmin’s calendar…" data-loading-detail="Comparing scheduled runs without making changes."><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button secondary">Inspect Garmin schedule</button></form></section>
+    {% else %}
+      {% include "conflict_form.html" %}
+      {% if preview.summary.overlapping_calendar_entries %}
+        <form class="approval-box vertical" method="post" action="{{ url_for('apply_cleanup') }}" data-loading-message="Cleaning the Garmin schedule…" data-loading-detail="Removing only the reviewed calendar conflicts. Completed activities remain untouched."><input type="hidden" name="csrf_token" value="{{ csrf_token }}">{% if preview.summary.obsolete_template_candidates %}<label class="consent"><input type="checkbox" name="delete_templates" value="1"><span><strong>Also delete {{ preview.summary.obsolete_template_candidates }} old workout-library template(s)</strong><small>Calendar entries will be removed either way. Completed activities are unaffected.</small></span></label>{% endif %}<button class="button danger" {% if preview.summary.unresolved_calendar_entries %}disabled{% endif %}>Remove listed calendar conflicts</button></form>
+      {% endif %}
     {% endif %}
   {% endif %}
 {% endblock %}

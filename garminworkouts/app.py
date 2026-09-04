@@ -17,7 +17,7 @@ from garminworkouts.models.training_plan import TrainingPlan
 from garminworkouts.plan import PlanApplier
 from garminworkouts.planner import DeterministicPlanner, write_plan
 from garminworkouts.replanning import calendar_changes, immutable_workout_keys, validate_mutable_replacement
-from garminworkouts.retire import PlanRetirement, ScheduledConflictCleanup
+from garminworkouts.retire import PlanRetirement, ScheduledConflictCleanup, combined_training_plan
 from garminworkouts.state import Goal
 
 WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
@@ -814,10 +814,17 @@ class InteractiveApp:
                     )
                 retirement_actions = []
                 if old_record:
-                    old_plan = TrainingPlan(old_record.config)
                     old_plan_finished = bool(
                         old_record.end_date < self.today
                         or self.state.block_progress_summary(old_record.id)["remaining"] == 0
+                    )
+                    old_plan = (
+                        combined_training_plan(
+                            self.state.block_lineage(old_record.id),
+                            name=old_record.name,
+                        )
+                        if old_plan_finished
+                        else TrainingPlan(old_record.config)
                     )
                     retirement = PlanRetirement(
                         old_plan,

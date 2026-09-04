@@ -7,7 +7,7 @@ other sports.
 
 > Garmin does not publish the web endpoints used by this tool. Garmin may change them without notice, and authentication can occasionally require maintenance. This fork uses the actively maintained `garminconnect` client for the current authenticated API.
 
-Current release: **1.5.1** · [Changelog](CHANGELOG.md) · [Release notes](docs/releases/v1.5.1.md)
+Current release: **1.5.2** · [Changelog](CHANGELOG.md) · [Release notes](docs/releases/v1.5.2.md)
 
 ## From training plan to Garmin Connect and your watch
 
@@ -124,12 +124,18 @@ Later starts open a readable dashboard. From there, refresh completed runs and t
 Nothing is changed in Garmin merely by opening the app or generating a proposal. Upload, scheduling, and replacement each require confirmation. When replacing a block, the tool uploads the approved replacement first, then unschedules future entries from the retired block and deletes only its obsolete workout templates. Completed Garmin activities and downloaded FIT files are never deleted.
 
 When a new block supersedes a finished block, obsolete workout-library templates from the finished block are removed
-automatically after the replacement has uploaded successfully. A template reused by the new block remains protected,
-and completed Garmin activities and local FIT evidence remain untouched.
+automatically after the replacement has uploaded successfully. Cleanup covers the complete previous block, including
+workouts completed before a mid-block adaptation. A template reused by the active block remains protected, and
+completed Garmin activities, calendar history, and local FIT evidence remain untouched.
 
 Before uploading, the CLI also checks Garmin itself for already scheduled workouts on every proposed date. This catches schedules made by older YAML versions or other tools that are absent from the local planner database. It lists each conflict and asks whether to remove the old calendar entries. Template deletion is a separate confirmation. Declining removal requires a second explicit confirmation before duplicate calendar entries are allowed.
 
 If duplicates already exist, choose **Review and clean Garmin schedule overlaps** from the main menu. The active local plan is treated as the version to keep. The tool previews older running workouts scheduled on those same dates, asks before unscheduling them, and separately asks whether their workout-library templates may also be deleted. A template can be reused on another calendar date, so retain it when unsure. This operation never deletes completed activities.
+
+For obsolete templates left by a finished block before automatic cleanup was available, open **Garmin cleanup** in the
+web dashboard. Select **Inspect previous-block workouts**, review the exact template names, confirm the deletion, and
+choose **Delete obsolete templates**. This is an idempotent one-time migration: repeating the inspection reports zero
+candidates once cleanup is complete. It does not unschedule calendar history or delete completed activities.
 
 During goal setup, optional heart-rate guidance can be configured separately for warm-up/cooldown, easy running, long runs, quality work, and interval recovery. Choose upper BPM caps, BPM ranges, or Garmin zones. These are user-supplied watch alerts—not calculated or clinically validated zones. Garmin supports only one intensity target per step, so when quality work has both goal pace and HR guidance, the wizard asks which target should be primary.
 
@@ -171,7 +177,8 @@ The web dashboard provides:
 - system-aware light and dark themes, with a persistent appearance switch at the top-right;
 - goal, availability, distance/time/pace, planning-period, and constraint forms;
 - independent maximum-BPM, BPM-range, or Garmin-zone targets for every workout phase;
-- current block progress, next workout, and a status-aware calendar with completed, missed, today, and future states;
+- current block progress that resets at each new block, plus the next workout and a status-aware calendar with
+  completed, missed, today, and future states;
 - a finished-block state with a clear **Generate next training block** action that refreshes Garmin progress and FIT
   evidence, starts after the previous block, and still requires review and explicit approval before scheduling;
 - automatic removal of obsolete workout-library templates from the finished block after its approved replacement is
@@ -183,6 +190,7 @@ The web dashboard provides:
 - two-stage Garmin login when an account requires an authenticator, email, or SMS verification code;
 - an explicit Garmin conflict inspection and removal decision before application;
 - protected cleanup of duplicates already present in Garmin;
+- preview-first one-time cleanup of obsolete templates left by the immediately preceding finished block;
 - a dynamic one-off heart-rate workout builder;
 - Garmin reconnection without storing the password; and
 - optional Claude (Anthropic) and OpenAI-compatible LLM settings, with masked, temporary API-key entry.

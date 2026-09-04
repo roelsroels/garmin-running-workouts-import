@@ -5,6 +5,24 @@ All notable changes to Garmin Running Workouts Import are documented here. The p
 
 ## [Unreleased]
 
+## [1.5.2] - 2026-09-04
+
+New training blocks now start with accurate progress counters, and deployments upgraded after an earlier rollover can
+preview and remove workout templates that were retained from the finished block.
+
+### Added
+
+- A preview-first, one-time web cleanup for obsolete Garmin workout templates left by the previous finished block.
+  It protects the complete active block lineage and never removes completed activities, FIT evidence, or calendar
+  history.
+
+### Fixed
+
+- Current-block counters now reset at a true next-block boundary instead of including completed and missed workouts
+  inherited from the finished predecessor. Mid-block adaptations still retain their elapsed progress.
+- Finished-block cleanup now covers workout templates from every revision of the previous block, including workouts
+  completed before a mid-block adaptation.
+
 ## [1.5.1] - 2026-09-04
 
 This patch release completes finished-block rollover by cleaning obsolete workout templates from Garmin Connect after

@@ -395,10 +395,21 @@ def create_app(config=None):
     def cleanup():
         with _state(app) as state:
             record = state.active_plan()
+            workflow = PlannerWorkflow(state)
             preview = None
+            obsolete_preview = None
             if record and request.args.get("inspected") == "1":
-                preview = PlannerWorkflow(state).load_active_conflicts(record.id)
-        return render_template("cleanup.html", plan=record, preview=preview)
+                preview = workflow.load_active_conflicts(record.id)
+            if record and request.args.get("obsolete_inspected") == "1":
+                obsolete_preview = workflow.load_previous_block_templates(record.id)
+            previous_plan = workflow.finished_previous_block() if record else None
+        return render_template(
+            "cleanup.html",
+            plan=record,
+            preview=preview,
+            previous_plan=previous_plan,
+            obsolete_preview=obsolete_preview,
+        )
 
     @app.post("/cleanup/inspect")
     def inspect_cleanup():
@@ -420,6 +431,26 @@ def create_app(config=None):
                 delete_templates=_checked("delete_templates"),
             )
         flash(f"Removed {len(actions)} conflicting Garmin item(s).", "success")
+        return redirect(url_for("dashboard"))
+
+    @app.post("/cleanup/obsolete/inspect")
+    def inspect_obsolete_cleanup():
+        with _state(app) as state:
+            PlannerWorkflow(state).inspect_previous_block_templates()
+        return redirect(url_for("cleanup", obsolete_inspected=1))
+
+    @app.post("/cleanup/obsolete/apply")
+    def apply_obsolete_cleanup():
+        if not _checked("confirm_obsolete_cleanup"):
+            raise ValueError("Confirm deletion of the reviewed obsolete workout templates")
+        with _state(app) as state:
+            record = state.active_plan()
+            if not record:
+                raise ValueError("There is no active plan")
+            workflow = PlannerWorkflow(state)
+            preview = workflow.load_previous_block_templates(record.id)
+            actions = workflow.clean_previous_block_templates(record, preview)
+        flash(f"Removed {len(actions)} obsolete workout template(s) from Garmin Connect.", "success")
         return redirect(url_for("dashboard"))
 
     @app.route("/workouts/new", methods=["GET", "POST"])

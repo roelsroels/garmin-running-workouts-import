@@ -3,7 +3,7 @@ from datetime import date
 import pytest
 
 from garminworkouts.models.training_plan import TrainingPlan
-from garminworkouts.retire import PlanRetirement, ScheduledConflictCleanup
+from garminworkouts.retire import PlanRetirement, ScheduledConflictCleanup, combined_training_plan
 
 
 def _plan(entries, name="Old block"):
@@ -129,6 +129,80 @@ def test_finished_plan_cleanup_deletes_past_templates_and_protects_reused_names(
     assert connection.deleted == [102]
     assert [action["action"] for action in actions] == ["deleted-workout-template"]
     assert any("finished plan" in warning for warning in preview["warnings"])
+
+
+def test_template_only_cleanup_never_changes_calendar_entries():
+    plan = _plan([("2026-08-06", "Old Easy"), ("2026-08-13", "Old Quality")])
+    connection = FakeConnection(
+        workouts=[_workout(101, "Old Easy"), _workout(102, "Old Quality")],
+        scheduled={
+            "calendarItems": [
+                {"id": 201, "workoutId": 101, "date": "2026-08-06"},
+                {"id": 202, "workoutId": 102, "date": "2026-08-13"},
+            ]
+        },
+    )
+    retirement = PlanRetirement(
+        plan,
+        connection,
+        today=date(2026, 8, 10),
+        delete_finished_templates=True,
+    )
+
+    actions = retirement.apply_templates(retirement.preview())
+
+    assert connection.unscheduled == []
+    assert connection.deleted == [101, 102]
+    assert [action["action"] for action in actions] == [
+        "deleted-workout-template",
+        "deleted-workout-template",
+    ]
+
+
+def test_combined_training_plan_prefers_latest_revision_and_includes_elapsed_names():
+    older = type(
+        "Record",
+        (),
+        {
+            "config": {
+                "workouts": [
+                    {
+                        "date": "2026-08-06",
+                        "sport": "running",
+                        "name": "Shared",
+                        "steps": [{"type": "interval", "duration": "20:00"}],
+                    },
+                    {
+                        "date": "2026-08-09",
+                        "sport": "running",
+                        "name": "Elapsed",
+                        "steps": [{"type": "interval", "duration": "30:00"}],
+                    },
+                ]
+            }
+        },
+    )()
+    newer = type(
+        "Record",
+        (),
+        {
+            "config": {
+                "workouts": [
+                    {
+                        "date": "2026-08-06",
+                        "sport": "running",
+                        "name": "Shared",
+                        "steps": [{"type": "interval", "duration": "25:00"}],
+                    }
+                ]
+            }
+        },
+    )()
+
+    plan = combined_training_plan([newer, older], name="Combined")
+
+    assert [entry["workout"].get_workout_name() for entry in plan.entries] == ["Shared", "Elapsed"]
+    assert plan.entries[0]["workout"].config["steps"][0]["duration"] == "25:00"
 
 
 def test_retirement_keeps_future_completed_workout_immutable():

@@ -167,6 +167,49 @@ def test_replacement_block_keeps_elapsed_progress_but_not_retired_future_dates(t
         assert state.block_progress_summary(replacement.id)["completed"] == 1
 
 
+def test_next_block_starts_with_its_own_progress_counts(tmp_path):
+    with AppState(tmp_path / "state") as state:
+        goal = state.save_goal(_goal())
+        original = state.save_plan(goal, _config(), tmp_path / "original.yaml", "moderate", [])
+        state.refresh_progress(
+            original.id,
+            [_activity(1, date(2030, 1, 8)), _activity(2, date(2030, 1, 10))],
+            today=date(2030, 1, 11),
+        )
+        next_config = {
+            "name": "Next block",
+            "metadata": {"continued_from_plan_id": original.id},
+            "workouts": [
+                {
+                    "date": "2030-01-12",
+                    "sport": "running",
+                    "name": "300112 Easy25",
+                    "steps": [{"type": "interval", "duration": "25:00"}],
+                }
+            ],
+        }
+        next_block = state.save_plan(
+            goal,
+            next_config,
+            tmp_path / "next.yaml",
+            "moderate",
+            [],
+            supersedes_plan_id=original.id,
+        )
+
+        assert [(row["workout_date"], row["status"]) for row in state.block_progress(next_block.id)] == [
+            ("2030-01-12", "scheduled"),
+        ]
+        assert state.block_progress_summary(next_block.id) == {
+            "total": 1,
+            "completed": 0,
+            "missed": 0,
+            "scheduled": 1,
+            "remaining": 1,
+        }
+        assert [record.id for record in state.block_lineage(next_block.id)] == [next_block.id]
+
+
 def test_goal_validation_rejects_missing_required_target():
     try:
         Goal(goal_type="target_time", description="Fast 10k", start_date=date.today())

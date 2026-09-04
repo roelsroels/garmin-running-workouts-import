@@ -13,7 +13,7 @@ from garminworkouts.models.training_plan import TrainingPlan
 from garminworkouts.plan import PlanApplier
 from garminworkouts.planner import DeterministicPlanner, write_plan
 from garminworkouts.replanning import calendar_changes, immutable_workout_keys, validate_mutable_replacement
-from garminworkouts.retire import PlanRetirement, ScheduledConflictCleanup
+from garminworkouts.retire import PlanRetirement, ScheduledConflictCleanup, combined_training_plan
 
 
 class GarminAuthenticationRequiredError(ValueError):
@@ -256,8 +256,15 @@ class PlannerWorkflow:
                     conflict_actions = cleanup.apply(preview, delete_templates=delete_templates)
                 retirement_actions = []
                 if old_record:
-                    old_plan = TrainingPlan(old_record.config)
                     old_plan_finished = self.plan_is_finished(old_record)
+                    old_plan = (
+                        combined_training_plan(
+                            self.state.block_lineage(old_record.id),
+                            name=old_record.name,
+                        )
+                        if old_plan_finished
+                        else TrainingPlan(old_record.config)
+                    )
                     retirement = PlanRetirement(
                         old_plan,
                         connection,
@@ -354,6 +361,74 @@ class PlannerWorkflow:
             {"active_plan_id": record.id, "actions": actions},
         )
         return actions
+
+    def inspect_previous_block_templates(self):
+        record, previous = self._finished_previous_block()
+        active_plan = combined_training_plan(self.state.block_lineage(record.id), name=record.name)
+        previous_plan = combined_training_plan(self.state.block_lineage(previous.id), name=previous.name)
+        with self.garmin_client() as connection:
+            preview = PlanRetirement(
+                previous_plan,
+                connection,
+                protected_plans=[active_plan],
+                today=self.today,
+                immutable_workouts=immutable_workout_keys(self.state.progress(previous.id)),
+                delete_finished_templates=True,
+            ).preview()
+        self._write_private_json(self._obsolete_cleanup_path(record.id), preview)
+        return record, previous, preview
+
+    def load_previous_block_templates(self, plan_id):
+        return self._read_json(self._obsolete_cleanup_path(plan_id))
+
+    def clean_previous_block_templates(self, record, expected):
+        current, previous = self._finished_previous_block()
+        if current.id != record.id:
+            raise ValueError("The active plan changed after inspection. Inspect the cleanup again.")
+        active_plan = combined_training_plan(self.state.block_lineage(current.id), name=current.name)
+        previous_plan = combined_training_plan(self.state.block_lineage(previous.id), name=previous.name)
+        with self.garmin_client() as connection:
+            retirement = PlanRetirement(
+                previous_plan,
+                connection,
+                protected_plans=[active_plan],
+                today=self.today,
+                immutable_workouts=immutable_workout_keys(self.state.progress(previous.id)),
+                delete_finished_templates=True,
+            )
+            preview = retirement.preview()
+            if preview != expected:
+                raise ValueError("The Garmin workout library changed after inspection. Inspect the cleanup again.")
+            actions = retirement.apply_templates(preview)
+        self.state.record_event(
+            "finished-block-templates-cleaned-from-web",
+            {"active_plan_id": current.id, "previous_plan_id": previous.id, "actions": actions},
+        )
+        return actions
+
+    def finished_previous_block(self):
+        try:
+            return self._finished_previous_block()[1]
+        except ValueError:
+            return None
+
+    def _finished_previous_block(self):
+        record = self.state.active_plan()
+        if not record:
+            raise ValueError("The active plan has no previous block to clean")
+        continued_from = next(
+            (
+                item.config.get("metadata", {}).get("continued_from_plan_id")
+                for item in self.state.block_lineage(record.id)
+                if item.config.get("metadata", {}).get("continued_from_plan_id")
+            ),
+            None,
+        )
+        previous_id = continued_from or record.supersedes_plan_id
+        previous = self.state.plan(previous_id) if previous_id else None
+        if not previous or not self.plan_is_finished(previous):
+            raise ValueError("The previous plan is not a finished training block")
+        return record, previous
 
     def save_one_off_draft(self, config):
         TrainingPlan(config)
@@ -492,6 +567,9 @@ class PlannerWorkflow:
 
     def _cleanup_conflict_path(self, plan_id):
         return self._web_state_dir / f"cleanup-{int(plan_id)}-conflicts.json"
+
+    def _obsolete_cleanup_path(self, plan_id):
+        return self._web_state_dir / f"cleanup-{int(plan_id)}-obsolete-templates.json"
 
     def _plan_explanation_path(self, plan_id):
         return self._web_state_dir / f"plan-{int(plan_id)}-explanation.json"

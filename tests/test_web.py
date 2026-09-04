@@ -524,6 +524,107 @@ def test_active_dashboard_calendar_cleanup_and_plan_review_render(tmp_path):
     assert b"A reviewable reason" in review.data
 
 
+def test_cleanup_offers_one_time_previous_block_template_removal(tmp_path, monkeypatch):
+    app = _app(tmp_path)
+    today = date.today()
+    previous_date = today - timedelta(days=1)
+    next_date = today + timedelta(days=1)
+
+    def config(name, workout_date, metadata=None):
+        return {
+            "name": name,
+            "metadata": metadata or {},
+            "workouts": [
+                {
+                    "date": workout_date.isoformat(),
+                    "sport": "running",
+                    "name": f"{workout_date:%y%m%d} Easy30",
+                    "steps": [{"type": "interval", "duration": "30:00"}],
+                }
+            ],
+        }
+
+    with AppState(app.config["DATA_DIR"]) as state:
+        goal = state.save_goal(
+            Goal(
+                goal_type="complete_distance",
+                description="Complete ten kilometres",
+                start_date=previous_date,
+                target_distance_km=10,
+            )
+        )
+        previous = state.save_plan(
+            goal,
+            config("Previous", previous_date),
+            state.plans_dir / "previous.yaml",
+            "moderate",
+            (),
+        )
+        state.refresh_progress(previous.id, [], today=today)
+        current = state.save_plan(
+            goal,
+            config("Current", next_date, {"continued_from_plan_id": previous.id}),
+            state.plans_dir / "current.yaml",
+            "moderate",
+            (),
+            supersedes_plan_id=previous.id,
+        )
+        state.activate_plan(current.id)
+
+    client = app.test_client()
+    dashboard = client.get("/")
+    page = client.get("/cleanup")
+
+    assert b"0 completed" in dashboard.data
+    assert b"1 remaining" in dashboard.data
+    assert page.status_code == 200
+    assert b"Previous finished block" in page.data
+    assert b"Inspect previous-block workouts" in page.data
+    assert b"completed activities, FIT evidence, and calendar history remain protected" in page.data
+
+    inspections = []
+    monkeypatch.setattr(
+        PlannerWorkflow,
+        "inspect_previous_block_templates",
+        lambda workflow: inspections.append(workflow.state.active_plan().id),
+    )
+    response = client.post(
+        "/cleanup/obsolete/inspect",
+        data={"csrf_token": _csrf(client)},
+    )
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/cleanup?obsolete_inspected=1")
+    assert inspections == [current.id]
+
+    preview = {"summary": {"workout_templates_to_delete": 1}, "workouts": []}
+    cleaned = []
+    monkeypatch.setattr(
+        PlannerWorkflow,
+        "load_previous_block_templates",
+        lambda _workflow, plan_id: preview if plan_id == current.id else None,
+    )
+    monkeypatch.setattr(
+        PlannerWorkflow,
+        "clean_previous_block_templates",
+        lambda _workflow, record, expected: cleaned.append((record.id, expected)) or [{"action": "deleted"}],
+    )
+    rejected = client.post(
+        "/cleanup/obsolete/apply",
+        data={"csrf_token": _csrf(client)},
+    )
+    assert rejected.status_code == 400
+    assert cleaned == []
+
+    applied = client.post(
+        "/cleanup/obsolete/apply",
+        data={"csrf_token": _csrf(client), "confirm_obsolete_cleanup": "1"},
+        follow_redirects=True,
+    )
+    assert applied.status_code == 200
+    assert b"Removed 1 obsolete workout template(s) from Garmin Connect." in applied.data
+    assert cleaned == [(current.id, preview)]
+
+
 def test_finished_dashboard_offers_next_training_block(tmp_path, monkeypatch):
     app = _app(tmp_path)
     finished_date = date.today() - timedelta(days=1)
