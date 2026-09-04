@@ -159,6 +159,7 @@ def create_app(config=None):
 
     @app.get("/")
     def dashboard():
+        today_value = date.today()
         with _state(app) as state:
             goal = state.active_goal()
             plan = state.active_plan()
@@ -168,7 +169,7 @@ def create_app(config=None):
                 (
                     item
                     for item in progress
-                    if item["status"] == "scheduled" and date.fromisoformat(item["workout_date"]) >= date.today()
+                    if item["status"] == "scheduled" and date.fromisoformat(item["workout_date"]) >= today_value
                 ),
                 None,
             )
@@ -184,6 +185,7 @@ def create_app(config=None):
             next_workout=next_workout,
             connected=connected,
             username=username,
+            block_finished=bool(plan and summary and (plan.end_date < today_value or summary["remaining"] == 0)),
         )
 
     @app.route("/goal", methods=["GET", "POST"])
@@ -230,6 +232,16 @@ def create_app(config=None):
                 record = workflow.generate_plan()
                 message = "A proposal was generated. Nothing has been changed in Garmin yet."
         flash(message, "success")
+        return redirect(url_for("review_plan", plan_id=record.id))
+
+    @app.post("/plans/next")
+    def generate_next_block():
+        with _state(app) as state:
+            record, changes = PlannerWorkflow(state).generate_next_block()
+        flash(
+            f"A new training-block proposal with {len(changes)} calendar addition(s) is ready for review.",
+            "success",
+        )
         return redirect(url_for("review_plan", plan_id=record.id))
 
     @app.post("/plans/adapt")

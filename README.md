@@ -119,7 +119,7 @@ On first use, the wizard asks only for the information needed to construct a pla
 3. Whether optional LLM explanations should be enabled. The planner itself does not require an LLM.
 4. Whether to fetch recent Garmin history, generate a proposal, and review it before scheduling.
 
-Later starts open a readable dashboard. From there, refresh completed runs and their available Garmin execution scores, view the full status-aware calendar, revise the goal, generate a new block, or assess completed FIT files and propose an adaptation to the remaining dates.
+Later starts open a readable dashboard. From there, refresh completed runs and their available Garmin execution scores, view the full status-aware calendar, revise the goal, generate a new block, or assess completed FIT files and propose an adaptation to the remaining dates. When the applied block has no workouts remaining, **Generate next training block** replaces the adaptation action and starts a reviewable continuation from the active goal.
 
 Nothing is changed in Garmin merely by opening the app or generating a proposal. Upload, scheduling, and replacement each require confirmation. When replacing a block, the tool uploads the approved replacement first, then unschedules future entries from the retired block and deletes only its obsolete workout templates. Completed Garmin activities and downloaded FIT files are never deleted.
 
@@ -168,6 +168,8 @@ The web dashboard provides:
 - goal, availability, distance/time/pace, planning-period, and constraint forms;
 - independent maximum-BPM, BPM-range, or Garmin-zone targets for every workout phase;
 - current block progress, next workout, and a status-aware calendar with completed, missed, today, and future states;
+- a finished-block state with a clear **Generate next training block** action that refreshes Garmin progress and FIT
+  evidence, starts after the previous block, and still requires review and explicit approval before scheduling;
 - an iCalendar (.ics) download of upcoming scheduled runs for Apple Calendar and other calendar apps;
 - cached actual distances and Garmin execution scores for completed planned workouts;
 - preview-only plan generation and FIT-driven adaptation;

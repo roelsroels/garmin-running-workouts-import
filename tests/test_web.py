@@ -524,6 +524,67 @@ def test_active_dashboard_calendar_cleanup_and_plan_review_render(tmp_path):
     assert b"A reviewable reason" in review.data
 
 
+def test_finished_dashboard_offers_next_training_block(tmp_path, monkeypatch):
+    app = _app(tmp_path)
+    finished_date = date.today() - timedelta(days=1)
+    config = {
+        "name": "Finished block",
+        "metadata": {"goal": {}, "baseline": {}},
+        "workouts": [
+            {
+                "date": finished_date.isoformat(),
+                "sport": "running",
+                "name": f"{finished_date:%y%m%d} Easy30",
+                "description": "30 minutes easy",
+                "steps": [{"type": "interval", "duration": "30:00"}],
+            }
+        ],
+    }
+    with AppState(app.config["DATA_DIR"]) as state:
+        goal = state.save_goal(
+            Goal(
+                goal_type="complete_distance",
+                description="Complete ten kilometres",
+                start_date=finished_date,
+                target_distance_km=10,
+            )
+        )
+        active = state.save_plan(
+            goal,
+            config,
+            state.plans_dir / "finished.yaml",
+            "moderate",
+            ("Finished rationale",),
+        )
+        state.activate_plan(active.id)
+
+    client = app.test_client()
+    dashboard = client.get("/")
+
+    assert b"Finished block" in dashboard.data
+    assert b"Ready for the next block" in dashboard.data
+    assert b"Generate next training block" in dashboard.data
+    assert b"Reassess remaining plan" not in dashboard.data
+    assert b"Edit the goal first" in dashboard.data
+
+    proposed = Mock(id=123)
+    generated = []
+
+    def generate_next(workflow):
+        generated.append(workflow.state.active_plan().id)
+        return proposed, ["add workout"]
+
+    monkeypatch.setattr(PlannerWorkflow, "generate_next_block", generate_next)
+    response = client.post(
+        "/plans/next",
+        data={"csrf_token": _csrf(client)},
+    )
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/plans/123")
+    assert generated == [active.id]
+
+
 def test_proposal_review_separates_calendar_history_from_five_upcoming_workouts(tmp_path):
     app = _app(tmp_path)
     today = date.today()

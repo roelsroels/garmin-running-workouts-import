@@ -83,9 +83,22 @@ class InteractiveApp:
         while True:
             self.show_dashboard()
             active_plan = self.state.active_plan()
+            block_finished = bool(
+                active_plan
+                and (
+                    active_plan.end_date < self.today
+                    or self.state.block_progress_summary(active_plan.id)["remaining"] == 0
+                )
+            )
             options = [
                 "Refresh completed activities",
-                "Assess progress and adapt the remaining plan" if active_plan else "Create the first training plan",
+                (
+                    "Generate the next training block"
+                    if block_finished
+                    else "Assess progress and adapt the remaining plan"
+                    if active_plan
+                    else "Create the first training plan"
+                ),
                 "Change the goal or availability",
                 "View the complete planned calendar",
                 "Review and clean Garmin schedule overlaps",
@@ -98,7 +111,12 @@ class InteractiveApp:
                 if choice == 1:
                     self.refresh()
                 elif choice == 2:
-                    self.adapt() if active_plan else self.generate_plan()
+                    if block_finished:
+                        self.generate_next_block()
+                    elif active_plan:
+                        self.adapt()
+                    else:
+                        self.generate_plan()
                 elif choice == 3:
                     self.change_goal()
                 elif choice == 4:
@@ -160,6 +178,8 @@ class InteractiveApp:
         if next_item:
             self.console.write("Next workout")
             self.console.write(f"  {next_item['workout_date']} · {next_item['workout_name']}")
+        elif summary["remaining"] == 0:
+            self.console.write("  This block is complete and ready for the next training block.")
         self.console.write(f"Planning confidence: {plan.confidence}")
 
     def show_calendar(self):
@@ -262,6 +282,59 @@ class InteractiveApp:
             self.console.write(f"Proposal saved locally at {plan_path}")
             return record
         self._apply_replacement(record, old_plan)
+        return record
+
+    def generate_next_block(self):
+        goal = self.state.active_goal()
+        active_plan = self.state.active_plan()
+        if not goal or not active_plan:
+            raise ValueError("An active goal and finished plan are required")
+
+        with self._garmin_client() as connection:
+            self.refresh(silent=True, connection=connection)
+            progress_rows = self.state.block_progress(active_plan.id)
+            progress = self.state.block_progress_summary(active_plan.id)
+            activities = self._fetch_recent_history(connection=connection)
+            fit_analysis = self._prepare_fit_analysis(activities, connection=connection)
+
+        proposal = self.planner.generate_next_block(
+            goal,
+            active_plan,
+            activities,
+            today=self.today,
+            fit_analysis=fit_analysis,
+            progress=progress_rows,
+        )
+        changes = self._calendar_changes(
+            active_plan.config,
+            proposal.config,
+            today=self.today,
+            progress=progress_rows,
+        )
+        self._print_proposal(proposal)
+        self.console.write("Proposed calendar additions")
+        for change in changes:
+            self.console.write(f"  {change}")
+        self._optional_llm_explanation(proposal, progress, changes)
+        if not self.console.confirm("Apply and schedule this next training block?", default=False):
+            self.console.write("The completed Garmin schedule was left unchanged.")
+            return None
+
+        plan_path = self._plan_path(proposal.config)
+        write_plan(plan_path, proposal.config)
+        record = self.state.save_plan(
+            goal,
+            proposal.config,
+            plan_path,
+            proposal.confidence,
+            proposal.rationale,
+            supersedes_plan_id=active_plan.id,
+        )
+        self._apply_replacement(record, active_plan)
+        self.state.record_event(
+            "next-block-applied",
+            {"plan_id": record.id, "previous_plan_id": active_plan.id},
+        )
         return record
 
     def adapt(self):

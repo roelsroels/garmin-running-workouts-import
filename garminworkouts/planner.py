@@ -1,7 +1,7 @@
 import math
 import os
 import statistics
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -149,6 +149,53 @@ class DeterministicPlanner:
             "workouts": workouts,
         }
         return PlanProposal(config, baseline, confidence, tuple(rationale))
+
+    def generate_next_block(self, goal, active_plan, activities, today=None, fit_analysis=None, progress=None):
+        """Create a fresh block after a finished applied block has no workouts left to run."""
+        today = today or date.today()
+        statuses = progress_statuses(progress)
+        active_workouts = active_plan.config.get("workouts", [])
+        upcoming = [
+            item
+            for item in active_workouts
+            if date.fromisoformat(str(item["date"])) >= today and workout_status(item, statuses, today) == "scheduled"
+        ]
+        if upcoming:
+            raise ValueError("The active plan still has upcoming workouts; reassess its remaining workouts instead")
+
+        next_start = max(today, active_plan.end_date + timedelta(days=1))
+        if goal.target_date and goal.target_date < next_start:
+            raise ValueError("The goal target date has passed; edit the goal before generating the next block")
+
+        next_goal = replace(goal, start_date=next_start)
+        proposal = self.generate(next_goal, activities)
+        completed_count = sum(workout_status(item, statuses, today) == "completed" for item in active_workouts)
+        missed_count = sum(workout_status(item, statuses, today) == "missed" for item in active_workouts)
+        decoded = len((fit_analysis or {}).get("activities", []))
+        failed = len((fit_analysis or {}).get("failures", []))
+        continuation_rationale = [
+            f"Started a new {goal.plan_weeks}-week block after the previous block ended on "
+            f"{active_plan.end_date.isoformat()}.",
+            f"Used {completed_count} completed and {missed_count} missed workout(s) from the previous block as "
+            "adherence context; missed workouts were not carried forward automatically.",
+            f"Decoded {decoded} recent original FIT file(s) as supplemental evidence; {failed} file(s) could not "
+            "be decoded.",
+        ]
+        rationale = (*continuation_rationale, *proposal.rationale)
+        metadata = {
+            **proposal.config.get("metadata", {}),
+            "continued_from_plan_id": active_plan.id,
+            "previous_block": {
+                "start_date": active_plan.start_date.isoformat(),
+                "end_date": active_plan.end_date.isoformat(),
+                "completed": completed_count,
+                "missed": missed_count,
+            },
+            "fit_assessment": {"decoded": decoded, "failures": failed},
+            "rationale": list(rationale),
+        }
+        config = {**proposal.config, "metadata": metadata}
+        return PlanProposal(config, proposal.baseline, proposal.confidence, rationale)
 
     def adapt_remaining(self, goal, active_plan, activities, today=None, fit_analysis=None, progress=None):
         today = today or date.today()

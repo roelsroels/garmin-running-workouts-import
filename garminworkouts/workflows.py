@@ -164,6 +164,36 @@ class PlannerWorkflow:
         proposal = self.planner.generate(goal, activities)
         return self._save_proposal(proposal, self.state.active_plan())
 
+    def generate_next_block(self):
+        goal = self.state.active_goal()
+        active_plan = self.state.active_plan()
+        if not goal or not active_plan:
+            raise ValueError("An active goal and finished plan are required")
+
+        with self.garmin_client() as connection:
+            self.refresh(connection=connection)
+            progress_rows = self.state.block_progress(active_plan.id)
+            activities = self.fetch_recent_history(connection=connection)
+            fit_analysis = self._prepare_fit_analysis(activities, connection)
+
+        proposal = self.planner.generate_next_block(
+            goal,
+            active_plan,
+            activities,
+            today=self.today,
+            fit_analysis=fit_analysis,
+            progress=progress_rows,
+        )
+        changes = self.calendar_changes(
+            active_plan.config,
+            proposal.config,
+            today=self.today,
+            progress=progress_rows,
+        )
+        record = self._save_proposal(proposal, active_plan)
+        self.state.record_event("next-block-proposed", {"plan_id": record.id, "previous_plan_id": active_plan.id})
+        return record, changes
+
     def adapt_plan(self):
         goal = self.state.active_goal()
         active_plan = self.state.active_plan()

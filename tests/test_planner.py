@@ -320,3 +320,70 @@ def test_adaptation_preserves_original_week_numbers_when_evidence_is_unchanged(t
     new_remaining = {item["date"]: (item["steps"], item["description"]) for item in proposal.config["workouts"]}
 
     assert new_remaining == old_remaining
+
+
+def test_next_block_starts_after_finished_plan_and_keeps_goal(tmp_path):
+    planner = DeterministicPlanner()
+    goal = _goal()
+    original = planner.generate(goal, _activities())
+    record = PlanRecord(
+        id=7,
+        goal_id=1,
+        name="Finished block",
+        start_date=date.fromisoformat(original.config["workouts"][0]["date"]),
+        end_date=date.fromisoformat(original.config["workouts"][-1]["date"]),
+        path=tmp_path / "finished.yaml",
+        config=original.config,
+        status="active",
+        confidence="high",
+        rationale=(),
+        created_at="now",
+    )
+    progress = [
+        {
+            "workout_date": item["date"],
+            "workout_name": item["name"],
+            "status": "completed" if index < 10 else "missed",
+        }
+        for index, item in enumerate(original.config["workouts"])
+    ]
+    today = record.end_date + timedelta(days=1)
+
+    proposal = planner.generate_next_block(
+        goal,
+        record,
+        _activities(),
+        today=today,
+        fit_analysis={"activities": [{"id": "fit-1"}], "failures": []},
+        progress=progress,
+    )
+
+    assert min(date.fromisoformat(item["date"]) for item in proposal.config["workouts"]) >= today
+    assert proposal.config["metadata"]["continued_from_plan_id"] == record.id
+    assert proposal.config["metadata"]["goal"]["start_date"] == today.isoformat()
+    assert proposal.config["metadata"]["previous_block"]["completed"] == 10
+    assert proposal.config["metadata"]["previous_block"]["missed"] == 2
+    assert proposal.config["metadata"]["fit_assessment"] == {"decoded": 1, "failures": 0}
+    assert any("missed workouts were not carried forward" in reason for reason in proposal.rationale)
+
+
+def test_next_block_rejects_plan_with_upcoming_workouts(tmp_path):
+    planner = DeterministicPlanner()
+    goal = _goal()
+    original = planner.generate(goal, _activities())
+    record = PlanRecord(
+        id=7,
+        goal_id=1,
+        name="Active block",
+        start_date=date.fromisoformat(original.config["workouts"][0]["date"]),
+        end_date=date.fromisoformat(original.config["workouts"][-1]["date"]),
+        path=tmp_path / "active.yaml",
+        config=original.config,
+        status="active",
+        confidence="high",
+        rationale=(),
+        created_at="now",
+    )
+
+    with pytest.raises(ValueError, match="still has upcoming workouts"):
+        planner.generate_next_block(goal, record, _activities(), today=record.start_date)

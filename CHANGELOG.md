@@ -7,6 +7,9 @@ All notable changes to Garmin Running Workouts Import are documented here. The p
 
 ### Added
 
+- A dedicated next-block action in the web dashboard and interactive CLI when the applied block has no remaining
+  workouts. It refreshes completed runs, assesses recent Garmin and FIT evidence, and creates a review-only proposal
+  from the active goal before any new schedule is uploaded.
 - Garmin two-factor authentication for interactive CLI and web logins. The web flow keeps a browser-scoped pending
   session in server memory for five minutes, limits code attempts, discards the password after the challenge, and
   persists only the resulting reusable Garmin tokens.

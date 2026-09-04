@@ -122,6 +122,64 @@ def test_workflow_requires_remaining_reassessment_when_an_active_plan_exists(tmp
             PlannerWorkflow(state, today=date(2030, 1, 5)).generate_plan()
 
 
+def test_workflow_generates_next_block_after_refreshing_finished_plan(tmp_path):
+    config = {
+        "name": "Finished",
+        "workouts": [
+            {
+                "date": "2030-01-03",
+                "sport": "running",
+                "name": "300103 Easy30",
+                "steps": [{"type": "interval", "duration": "30:00"}],
+            }
+        ],
+    }
+    with AppState(tmp_path / "state") as state:
+        goal = state.save_goal(
+            Goal(
+                goal_type="complete_distance",
+                description="Complete ten kilometres",
+                start_date=date(2030, 1, 3),
+                target_distance_km=10,
+            )
+        )
+        active = state.save_plan(goal, config, state.plans_dir / "finished.yaml", "moderate", ())
+        state.activate_plan(active.id)
+        state.refresh_progress(active.id, [], today=date(2030, 1, 5))
+        workflow = PlannerWorkflow(state, today=date(2030, 1, 5))
+        connection = MagicMock()
+        managed = MagicMock()
+        managed.__enter__.return_value = connection
+        workflow.garmin_client = MagicMock(return_value=managed)
+        workflow.refresh = MagicMock()
+        workflow.fetch_recent_history = MagicMock(return_value=[])
+        workflow._prepare_fit_analysis = MagicMock(return_value={"activities": [], "failures": []})
+
+        record, changes = workflow.generate_next_block()
+
+        assert record.supersedes_plan_id == active.id
+        assert record.start_date >= date(2030, 1, 5)
+        assert changes and all(": add " in change for change in changes)
+        assert record.config["metadata"]["continued_from_plan_id"] == active.id
+        workflow.refresh.assert_called_once_with(connection=connection)
+        workflow.fetch_recent_history.assert_called_once_with(connection=connection)
+        workflow._prepare_fit_analysis.assert_called_once_with([], connection)
+
+
+def test_workflow_next_block_requires_an_active_plan(tmp_path):
+    with AppState(tmp_path / "state") as state:
+        state.save_goal(
+            Goal(
+                goal_type="complete_distance",
+                description="Complete ten kilometres",
+                start_date=date(2030, 1, 3),
+                target_distance_km=10,
+            )
+        )
+        with pytest.raises(ValueError, match="active goal and finished plan"):
+            PlannerWorkflow(state, today=date(2030, 1, 5)).generate_next_block()
+
+
 def test_workflow_rejects_stale_replacement_with_immutable_dates_before_garmin(tmp_path):
     old_config = {
         "name": "Old",
