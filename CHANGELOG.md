@@ -5,6 +5,11 @@ All notable changes to Garmin Running Workouts Import are documented here. The p
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-09-04
+
+This patch release completes finished-block rollover by cleaning obsolete workout templates from Garmin Connect after
+the replacement block has been uploaded successfully.
+
 ### Fixed
 
 - Applying a replacement after a block finishes now removes its obsolete workout-library templates from Garmin
