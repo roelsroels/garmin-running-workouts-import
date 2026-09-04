@@ -123,6 +123,10 @@ Later starts open a readable dashboard. From there, refresh completed runs and t
 
 Nothing is changed in Garmin merely by opening the app or generating a proposal. Upload, scheduling, and replacement each require confirmation. When replacing a block, the tool uploads the approved replacement first, then unschedules future entries from the retired block and deletes only its obsolete workout templates. Completed Garmin activities and downloaded FIT files are never deleted.
 
+When a new block supersedes a finished block, obsolete workout-library templates from the finished block are removed
+automatically after the replacement has uploaded successfully. A template reused by the new block remains protected,
+and completed Garmin activities and local FIT evidence remain untouched.
+
 Before uploading, the CLI also checks Garmin itself for already scheduled workouts on every proposed date. This catches schedules made by older YAML versions or other tools that are absent from the local planner database. It lists each conflict and asks whether to remove the old calendar entries. Template deletion is a separate confirmation. Declining removal requires a second explicit confirmation before duplicate calendar entries are allowed.
 
 If duplicates already exist, choose **Review and clean Garmin schedule overlaps** from the main menu. The active local plan is treated as the version to keep. The tool previews older running workouts scheduled on those same dates, asks before unscheduling them, and separately asks whether their workout-library templates may also be deleted. A template can be reused on another calendar date, so retain it when unsure. This operation never deletes completed activities.
@@ -170,6 +174,8 @@ The web dashboard provides:
 - current block progress, next workout, and a status-aware calendar with completed, missed, today, and future states;
 - a finished-block state with a clear **Generate next training block** action that refreshes Garmin progress and FIT
   evidence, starts after the previous block, and still requires review and explicit approval before scheduling;
+- automatic removal of obsolete workout-library templates from the finished block after its approved replacement is
+  uploaded, while completed activities, FIT evidence, and reused templates remain protected;
 - an iCalendar (.ics) download of upcoming scheduled runs for Apple Calendar and other calendar apps;
 - cached actual distances and Garmin execution scores for completed planned workouts;
 - preview-only plan generation and FIT-driven adaptation;

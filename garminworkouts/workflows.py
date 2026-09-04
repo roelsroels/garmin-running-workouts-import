@@ -257,12 +257,14 @@ class PlannerWorkflow:
                 retirement_actions = []
                 if old_record:
                     old_plan = TrainingPlan(old_record.config)
+                    old_plan_finished = self.plan_is_finished(old_record)
                     retirement = PlanRetirement(
                         old_plan,
                         connection,
                         protected_plans=[new_plan],
                         today=self.today,
                         immutable_workouts=immutable_workout_keys(self.state.progress(old_record.id)),
+                        delete_finished_templates=old_plan_finished,
                     )
                     retirement_actions = retirement.apply(retirement.preview())
         except GarminRateLimitError:
@@ -453,6 +455,11 @@ class PlannerWorkflow:
     @staticmethod
     def calendar_changes(old_config, new_config, today=None, progress=None):
         return calendar_changes(old_config, new_config, today=today, progress=progress)
+
+    def plan_is_finished(self, record):
+        if record is None:
+            return False
+        return bool(record.end_date < self.today or self.state.block_progress_summary(record.id)["remaining"] == 0)
 
     @staticmethod
     def _validate_conflict_choice(preview, remove_conflicts, delete_templates, allow_duplicates):

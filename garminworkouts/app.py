@@ -815,12 +815,17 @@ class InteractiveApp:
                 retirement_actions = []
                 if old_record:
                     old_plan = TrainingPlan(old_record.config)
+                    old_plan_finished = bool(
+                        old_record.end_date < self.today
+                        or self.state.block_progress_summary(old_record.id)["remaining"] == 0
+                    )
                     retirement = PlanRetirement(
                         old_plan,
                         connection,
                         protected_plans=[new_plan],
                         today=self.today,
                         immutable_workouts=immutable_workout_keys(self.state.progress(old_record.id)),
+                        delete_finished_templates=old_plan_finished,
                     )
                     retirement_preview = retirement.preview()
                     retirement_actions = retirement.apply(retirement_preview)
@@ -847,7 +852,11 @@ class InteractiveApp:
                 "retirement_actions": retirement_actions,
             },
         )
-        self.console.write("The plan was scheduled successfully in Garmin Connect.")
+        deleted_templates = sum(action["action"] == "deleted-workout-template" for action in retirement_actions)
+        message = "The plan was scheduled successfully in Garmin Connect."
+        if deleted_templates:
+            message += f" Removed {deleted_templates} obsolete workout template(s) from the previous block."
+        self.console.write(message)
         return True
 
     def _review_schedule_conflicts(self, new_plan, connection, replacement_pending=True):

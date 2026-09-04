@@ -1,8 +1,9 @@
-from datetime import date
+from datetime import date, datetime
 from unittest.mock import MagicMock
 
 import pytest
 
+from garminworkouts.activities import ActivitySummary
 from garminworkouts.state import AppState, Goal
 from garminworkouts.workflows import PlannerWorkflow
 
@@ -178,6 +179,138 @@ def test_workflow_next_block_requires_an_active_plan(tmp_path):
         )
         with pytest.raises(ValueError, match="active goal and finished plan"):
             PlannerWorkflow(state, today=date(2030, 1, 5)).generate_next_block()
+
+
+def test_workflow_recognizes_a_future_ended_plan_when_no_workouts_remain(tmp_path):
+    workout_date = date(2030, 1, 10)
+    config = {
+        "name": "Completed early",
+        "workouts": [
+            {
+                "date": workout_date.isoformat(),
+                "sport": "running",
+                "name": "300110 Easy30",
+                "steps": [{"type": "interval", "duration": "30:00"}],
+            }
+        ],
+    }
+    activity = ActivitySummary(
+        "completed-early",
+        "Completed early",
+        datetime.combine(workout_date, datetime.min.time()),
+        "running",
+    )
+    with AppState(tmp_path / "state") as state:
+        goal = state.save_goal(
+            Goal(
+                goal_type="complete_distance",
+                description="Complete ten kilometres",
+                start_date=workout_date,
+                target_distance_km=10,
+            )
+        )
+        active = state.save_plan(goal, config, state.plans_dir / "completed.yaml", "moderate", ())
+        state.activate_plan(active.id)
+        workflow = PlannerWorkflow(state, today=date(2030, 1, 5))
+
+        assert workflow.plan_is_finished(active) is False
+        state.refresh_progress(active.id, [activity], today=date(2030, 1, 5))
+        assert workflow.plan_is_finished(active) is True
+
+
+def test_workflow_enables_finished_template_cleanup_when_applying_next_block(tmp_path, monkeypatch):
+    today = date(2030, 1, 5)
+
+    def config(name, workout_date):
+        return {
+            "name": name,
+            "workouts": [
+                {
+                    "date": workout_date.isoformat(),
+                    "sport": "running",
+                    "name": f"{workout_date:%y%m%d} Easy30",
+                    "steps": [{"type": "interval", "duration": "30:00"}],
+                }
+            ],
+        }
+
+    preview = {
+        "calendar": [],
+        "templates": [],
+        "summary": {
+            "overlapping_calendar_entries": 0,
+            "unresolved_calendar_entries": 0,
+            "obsolete_template_candidates": 0,
+        },
+        "warnings": [],
+    }
+    captured = {}
+
+    class FakeCleanup:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def preview(self):
+            return preview
+
+    class FakeApplier:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def apply(self, schedule):
+            assert schedule is True
+            return [{"action": "scheduled"}]
+
+    class FakeRetirement:
+        def __init__(self, *_args, **kwargs):
+            captured.update(kwargs)
+
+        def preview(self):
+            return {"calendar": [], "workouts": []}
+
+        def apply(self, _preview):
+            return [{"action": "deleted-workout-template", "workout_id": 42}]
+
+    monkeypatch.setattr("garminworkouts.workflows.ScheduledConflictCleanup", FakeCleanup)
+    monkeypatch.setattr("garminworkouts.workflows.PlanApplier", FakeApplier)
+    monkeypatch.setattr("garminworkouts.workflows.PlanRetirement", FakeRetirement)
+
+    with AppState(tmp_path / "state") as state:
+        goal = state.save_goal(
+            Goal(
+                goal_type="complete_distance",
+                description="Complete ten kilometres",
+                start_date=today - date.resolution,
+                target_distance_km=10,
+            )
+        )
+        active = state.save_plan(
+            goal,
+            config("Finished", today - date.resolution),
+            state.plans_dir / "finished.yaml",
+            "moderate",
+            (),
+        )
+        state.activate_plan(active.id)
+        state.refresh_progress(active.id, [], today=today)
+        proposal = state.save_plan(
+            goal,
+            config("Next", today + date.resolution),
+            state.plans_dir / "next.yaml",
+            "moderate",
+            (),
+            supersedes_plan_id=active.id,
+        )
+        workflow = PlannerWorkflow(state, today=today)
+        managed = MagicMock()
+        managed.__enter__.return_value = MagicMock()
+        workflow.garmin_client = MagicMock(return_value=managed)
+
+        result = workflow.apply_plan(proposal, preview, False, False, False)
+
+        assert captured["delete_finished_templates"] is True
+        assert result["retirement"][0]["action"] == "deleted-workout-template"
+        assert state.active_plan().id == proposal.id
 
 
 def test_workflow_rejects_stale_replacement_with_immutable_dates_before_garmin(tmp_path):

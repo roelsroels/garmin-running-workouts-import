@@ -585,6 +585,62 @@ def test_finished_dashboard_offers_next_training_block(tmp_path, monkeypatch):
     assert generated == [active.id]
 
 
+def test_finished_block_proposal_discloses_automatic_template_cleanup(tmp_path):
+    app = _app(tmp_path)
+    today = date.today()
+    finished_date = today - timedelta(days=1)
+    next_date = today + timedelta(days=1)
+
+    def config(name, workout_date):
+        return {
+            "name": name,
+            "metadata": {},
+            "workouts": [
+                {
+                    "date": workout_date.isoformat(),
+                    "sport": "running",
+                    "name": f"{workout_date:%y%m%d} Easy30",
+                    "description": "30 minutes easy",
+                    "steps": [{"type": "interval", "duration": "30:00"}],
+                }
+            ],
+        }
+
+    with AppState(app.config["DATA_DIR"]) as state:
+        goal = state.save_goal(
+            Goal(
+                goal_type="complete_distance",
+                description="Complete ten kilometres",
+                start_date=finished_date,
+                target_distance_km=10,
+            )
+        )
+        active = state.save_plan(
+            goal,
+            config("Finished", finished_date),
+            state.plans_dir / "finished.yaml",
+            "moderate",
+            (),
+        )
+        state.activate_plan(active.id)
+        state.refresh_progress(active.id, [], today=today)
+        proposal = state.save_plan(
+            goal,
+            config("Next", next_date),
+            state.plans_dir / "next.yaml",
+            "moderate",
+            (),
+            supersedes_plan_id=active.id,
+        )
+
+    response = app.test_client().get(f"/plans/{proposal.id}")
+
+    assert response.status_code == 200
+    assert b"Finished-block cleanup" in response.data
+    assert b"Old workout templates will be removed" in response.data
+    assert b"Completed activities, FIT evidence" in response.data
+
+
 def test_proposal_review_separates_calendar_history_from_five_upcoming_workouts(tmp_path):
     app = _app(tmp_path)
     today = date.today()

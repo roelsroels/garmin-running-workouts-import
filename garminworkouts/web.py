@@ -271,6 +271,9 @@ def create_app(config=None):
             llm_enabled = state.get_setting("llm_provider", "none") != "none"
             old_record = state.plan(record.supersedes_plan_id) if record.supersedes_plan_id else None
             old_progress = state.progress(old_record.id) if old_record else []
+            retiring_finished_block = bool(
+                old_record and PlannerWorkflow(state, today=today_value).plan_is_finished(old_record)
+            )
             changes = (
                 PlannerWorkflow.calendar_changes(
                     old_record.config,
@@ -304,6 +307,7 @@ def create_app(config=None):
             changes=changes,
             explanation=explanation,
             llm_enabled=llm_enabled,
+            retiring_finished_block=retiring_finished_block,
         )
 
     @app.post("/plans/<int:plan_id>/explain")
@@ -343,14 +347,18 @@ def create_app(config=None):
                 raise ValueError("Only a proposal can be applied")
             workflow = PlannerWorkflow(state)
             preview = workflow.load_plan_conflicts(plan_id)
-            workflow.apply_plan(
+            result = workflow.apply_plan(
                 record,
                 preview,
                 remove_conflicts=_checked("remove_conflicts"),
                 delete_templates=_checked("delete_templates"),
                 allow_duplicates=_checked("allow_duplicates"),
             )
-        flash("The plan was scheduled successfully in Garmin Connect.", "success")
+        deleted_templates = sum(action["action"] == "deleted-workout-template" for action in result["retirement"])
+        message = "The plan was scheduled successfully in Garmin Connect."
+        if deleted_templates:
+            message += f" Removed {deleted_templates} obsolete workout template(s) from the previous block."
+        flash(message, "success")
         return redirect(url_for("dashboard"))
 
     @app.get("/calendar")

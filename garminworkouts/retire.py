@@ -111,12 +111,21 @@ class ScheduledConflictCleanup:
 
 
 class PlanRetirement:
-    def __init__(self, plan, connection, protected_plans=None, today=None, immutable_workouts=None):
+    def __init__(
+        self,
+        plan,
+        connection,
+        protected_plans=None,
+        today=None,
+        immutable_workouts=None,
+        delete_finished_templates=False,
+    ):
         self.plan = plan
         self.connection = connection
         self.protected_plans = protected_plans or []
         self.today = today or date.today()
         self.immutable_workouts = set(immutable_workouts or ())
+        self.delete_finished_templates = delete_finished_templates
 
     def preview(self):
         plan_entries = self.plan.entries
@@ -127,6 +136,8 @@ class PlanRetirement:
             if entry["date"] < self.today
             or (entry["date"].isoformat(), entry["workout"].get_workout_name()) in self.immutable_workouts
         }
+        if self.delete_finished_templates:
+            immutable_names.clear()
         protected_names, protected_calendar_keys = self._protected_keys()
         existing_by_name = self._existing_workouts_by_name(target_names)
 
@@ -208,6 +219,10 @@ class PlanRetirement:
         warnings = []
         if unresolved:
             warnings.append("One or more future schedules lack a Garmin schedule ID; apply is blocked.")
+        if self.delete_finished_templates:
+            warnings.append(
+                "Obsolete workout-library templates from the finished plan will be deleted after replacement upload."
+            )
         warnings.append("Completed activity/FIT records are outside this operation and will not be deleted.")
 
         return {

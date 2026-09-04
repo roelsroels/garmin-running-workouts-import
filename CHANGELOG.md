@@ -5,6 +5,11 @@ All notable changes to Garmin Running Workouts Import are documented here. The p
 
 ## [Unreleased]
 
+### Fixed
+
+- Applying a replacement after a block finishes now removes its obsolete workout-library templates from Garmin
+  Connect. Completed activities, FIT evidence, and templates reused by the new block remain protected.
+
 ## [1.5.0] - 2026-09-04
 
 Completed blocks now lead directly into a reviewable next training block, and Garmin accounts that require a

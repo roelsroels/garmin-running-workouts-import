@@ -21,6 +21,14 @@
 
   <section class="card"><h2>Calendar changes</h2><ul class="compact-list">{% for change in changes %}<li>{{ change }}</li>{% else %}<li>No upcoming calendar changes.</li>{% endfor %}</ul></section>
 
+  {% if retiring_finished_block %}
+    <section class="card">
+      <p class="eyebrow">Finished-block cleanup</p>
+      <h2>Old workout templates will be removed</h2>
+      <p class="muted">After the new schedule uploads, obsolete workout-library templates from the finished block are deleted from Garmin Connect. Completed activities, FIT evidence, and templates reused by the new block remain protected.</p>
+    </section>
+  {% endif %}
+
   {% if history %}
     <section class="schedule-list">
       <div class="section-title"><p class="eyebrow">Plan history</p><h2>{{ history|length }} completed or missed day{{ '' if history|length == 1 else 's' }}</h2></div>

@@ -95,6 +95,42 @@ def test_preview_and_apply_retains_past_workout_and_template_then_retires_future
     ]
 
 
+def test_finished_plan_cleanup_deletes_past_templates_and_protects_reused_names():
+    plan = _plan([("2026-08-06", "Shared Easy"), ("2026-08-09", "Old Long")])
+    protected_plan = _plan([("2026-09-06", "Shared Easy")], name="New block")
+    connection = FakeConnection(
+        workouts=[_workout(101, "Shared Easy"), _workout(102, "Old Long")],
+        scheduled={
+            "calendarItems": [
+                {"id": 201, "workoutId": 101, "date": "2026-08-06"},
+                {"id": 202, "workoutId": 102, "date": "2026-08-09"},
+            ]
+        },
+    )
+    retirement = PlanRetirement(
+        plan,
+        connection,
+        protected_plans=[protected_plan],
+        today=date(2026, 8, 10),
+        immutable_workouts={("2026-08-06", "Shared Easy"), ("2026-08-09", "Old Long")},
+        delete_finished_templates=True,
+    )
+
+    preview = retirement.preview()
+    actions = retirement.apply(preview)
+
+    assert preview["summary"]["past_calendar_entries_retained"] == 2
+    assert preview["summary"]["workout_templates_to_delete"] == 1
+    assert preview["summary"]["protected_workout_templates"] == 1
+    assert preview["summary"]["immutable_workout_templates"] == 0
+    assert next(item for item in preview["workouts"] if item["name"] == "Shared Easy")["action"] == ("retain-protected")
+    assert next(item for item in preview["workouts"] if item["name"] == "Old Long")["action"] == "delete"
+    assert connection.unscheduled == []
+    assert connection.deleted == [102]
+    assert [action["action"] for action in actions] == ["deleted-workout-template"]
+    assert any("finished plan" in warning for warning in preview["warnings"])
+
+
 def test_retirement_keeps_future_completed_workout_immutable():
     plan = _plan([("2026-08-13", "Completed early"), ("2026-08-16", "Mutable")])
     connection = FakeConnection(
