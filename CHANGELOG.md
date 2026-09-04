@@ -5,6 +5,11 @@ All notable changes to Garmin Running Workouts Import are documented here. The p
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-09-04
+
+Completed blocks now lead directly into a reviewable next training block, and Garmin accounts that require a
+verification code can complete authentication without disrupting the existing login flow.
+
 ### Added
 
 - A dedicated next-block action in the web dashboard and interactive CLI when the applied block has no remaining
@@ -18,6 +23,8 @@ All notable changes to Garmin Running Workouts Import are documented here. The p
 
 - Authentication failures now show safe, actionable messages while Garmin HTTP 429 responses continue to use the
   existing persistent cooldown. Normal password and reusable-token login paths remain unchanged.
+- Refreshed the anonymized dashboard screenshot to demonstrate the finished-block summary and prominent next-block
+  action.
 
 ## [1.4.1] - 2026-08-30
 

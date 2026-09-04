@@ -7,7 +7,7 @@ other sports.
 
 > Garmin does not publish the web endpoints used by this tool. Garmin may change them without notice, and authentication can occasionally require maintenance. This fork uses the actively maintained `garminconnect` client for the current authenticated API.
 
-Current release: **1.4.1** · [Changelog](CHANGELOG.md) · [Release notes](docs/releases/v1.4.1.md)
+Current release: **1.5.0** · [Changelog](CHANGELOG.md) · [Release notes](docs/releases/v1.5.0.md)
 
 ## From training plan to Garmin Connect and your watch
 
@@ -41,7 +41,7 @@ activity data. The calendar deliberately includes completed runs with execution 
 run, today's next workout, and future workouts. The top-right appearance control follows the system by default and also
 offers persistent Light and Dark overrides.
 
-![Light-mode web dashboard showing the appearance selector, active running goal, heart-rate guidance, block progress, next workout, and planner actions](docs/images/web-dashboard.jpg)
+![Light-mode web dashboard showing a finished training block, its completion summary, and the primary action to generate the next training block](docs/images/web-dashboard.jpg)
 
 | Light calendar | Dark calendar |
 | --- | --- |
