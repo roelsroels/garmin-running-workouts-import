@@ -5,6 +5,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+  id-token: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -42,6 +46,8 @@ jobs:
       - uses: codecov/codecov-action@v6
         with:
           env_vars: PYTHON_VERSION
+          use_oidc: true
+          fail_ci_if_error: true
 
   result:
     if: ${{ always() }}

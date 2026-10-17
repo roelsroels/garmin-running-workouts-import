@@ -5,6 +5,12 @@ All notable changes to Garmin Running Workouts Import are documented here. The p
 
 ## [Unreleased]
 
+### Fixed
+
+- README release badge no longer uses an unnecessary query parameter that could leave a stale invalid result cached.
+- CI now authenticates Codecov uploads through GitHub OIDC and fails visibly if coverage cannot be published, preventing
+  a misleading `unknown` coverage badge.
+
 ## [1.5.2] - 2026-09-04
 
 New training blocks now start with accurate progress counters, and deployments upgraded after an earlier rollover can
