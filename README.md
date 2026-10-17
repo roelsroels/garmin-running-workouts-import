@@ -1,5 +1,12 @@
 # Garmin Running Workouts Import
 
+[![Latest release](https://img.shields.io/github/v/release/roelsroels/garmin-running-workouts-import?sort=semver)](https://github.com/roelsroels/garmin-running-workouts-import/releases/latest)
+[![CI](https://github.com/roelsroels/garmin-running-workouts-import/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/roelsroels/garmin-running-workouts-import/actions/workflows/ci.yml)
+[![Coverage](https://codecov.io/gh/roelsroels/garmin-running-workouts-import/branch/main/graph/badge.svg)](https://codecov.io/gh/roelsroels/garmin-running-workouts-import)
+[![Python 3.12–3.14](https://img.shields.io/badge/python-3.12%E2%80%933.14-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![License](https://img.shields.io/github/license/roelsroels/garmin-running-workouts-import)](LICENSE)
+[![Open issues](https://img.shields.io/github/issues/roelsroels/garmin-running-workouts-import)](https://github.com/roelsroels/garmin-running-workouts-import/issues)
+
 Create a running plan from your goals and recent activities, then **automatically upload the approved workouts to Garmin
 Connect and schedule them on their planned dates**. Use the web interface or interactive CLI; YAML is available for
 advanced use, not required for normal planning. This fork is intentionally running-only; use the upstream project for
