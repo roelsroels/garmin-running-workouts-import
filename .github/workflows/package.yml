@@ -1,0 +1,39 @@
+name: Package
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Build wheel and source distribution
+        run: uv build --out-dir dist-check
+
+      - name: Verify release files
+        run: |
+          test "$(find dist-check -maxdepth 1 -name '*.whl' | wc -l | tr -d ' ')" = "1"
+          test "$(find dist-check -maxdepth 1 -name '*.tar.gz' | wc -l | tr -d ' ')" = "1"
+
+      - name: Install wheel in isolation
+        run: |
+          uv venv /tmp/garmin-package-smoke --python 3.14
+          uv pip install --python /tmp/garmin-package-smoke/bin/python dist-check/*.whl
+          /tmp/garmin-package-smoke/bin/garmin-workouts --help

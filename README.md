@@ -2,9 +2,18 @@
 
 [![Latest release](https://img.shields.io/github/v/release/roelsroels/garmin-running-workouts-import)](https://github.com/roelsroels/garmin-running-workouts-import/releases/latest)
 [![CI](https://github.com/roelsroels/garmin-running-workouts-import/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/roelsroels/garmin-running-workouts-import/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/roelsroels/garmin-running-workouts-import/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/roelsroels/garmin-running-workouts-import/actions/workflows/codeql.yml)
+[![Package](https://github.com/roelsroels/garmin-running-workouts-import/actions/workflows/package.yml/badge.svg?branch=main)](https://github.com/roelsroels/garmin-running-workouts-import/actions/workflows/package.yml)
+[![Docs](https://github.com/roelsroels/garmin-running-workouts-import/actions/workflows/docs.yml/badge.svg?branch=main)](https://github.com/roelsroels/garmin-running-workouts-import/actions/workflows/docs.yml)
 [![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Froelsroels%2Fgarmin-running-workouts-import%2Fmain%2Fdocs%2Fbadges%2Fcoverage.json)](https://github.com/roelsroels/garmin-running-workouts-import/actions/workflows/ci.yml)
 [![Python 3.12–3.14](https://img.shields.io/badge/python-3.12%E2%80%933.14-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Linux and macOS](https://img.shields.io/badge/tested-Linux%20%7C%20macOS-4C8CBF)](https://github.com/roelsroels/garmin-running-workouts-import/actions/workflows/ci.yml)
+[![Ruff](https://img.shields.io/badge/code%20style-Ruff-D7FF64?logo=ruff&logoColor=261230)](https://docs.astral.sh/ruff/)
+[![uv](https://img.shields.io/badge/package%20manager-uv-DE5FE9?logo=uv&logoColor=261230)](https://docs.astral.sh/uv/)
+[![Dependabot](https://img.shields.io/badge/dependencies-Dependabot-025E8C?logo=dependabot)](.github/dependabot.yml)
+[![Web and CLI](https://img.shields.io/badge/interfaces-Web%20%2B%20CLI-0B7285)](#cli-and-web-feature-coverage)
 [![License](https://img.shields.io/github/license/roelsroels/garmin-running-workouts-import)](LICENSE)
+[![Last commit](https://img.shields.io/github/last-commit/roelsroels/garmin-running-workouts-import)](https://github.com/roelsroels/garmin-running-workouts-import/commits/main/)
 [![Open issues](https://img.shields.io/github/issues/roelsroels/garmin-running-workouts-import)](https://github.com/roelsroels/garmin-running-workouts-import/issues)
 
 Create a running plan from your goals and recent activities, then **automatically upload the approved workouts to Garmin

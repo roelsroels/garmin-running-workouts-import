@@ -23,6 +23,7 @@ venv/
 .garmin-cookies.txt
 *.garmin-cookies.txt
 .garmin-tokens/
+.tokens/
 
 # Personalized dated plans stay local
 personal_plans/

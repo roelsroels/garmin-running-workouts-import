@@ -5,8 +5,19 @@ All notable changes to Garmin Running Workouts Import are documented here. The p
 
 ## [Unreleased]
 
+### Added
+
+- CodeQL security analysis for the Python and browser JavaScript code.
+- Dedicated package verification that builds both release formats, installs the wheel in isolation, and exercises the
+  installed CLI entry point.
+- Documentation verification for broken repository-local Markdown links and image references.
+- README badges for security, package and documentation checks, repository activity, Ruff, uv, Dependabot, the tested
+  operating systems, and the available web and CLI interfaces.
+
 ### Fixed
 
+- CI now verifies Python on both Ubuntu and macOS while retaining the complete Python 3.12–3.14 compatibility matrix.
+- Local `.tokens` authentication and rate-limit state is now ignored by Git.
 - README release badge no longer uses an unnecessary query parameter that could leave a stale invalid result cached.
 - The coverage badge now uses a repository-hosted snapshot from the verified CI report, avoiding an unconfigured
   external service and preventing a misleading `unknown` value.
