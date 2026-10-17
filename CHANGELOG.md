@@ -7,7 +7,8 @@ All notable changes to Garmin Running Workouts Import are documented here. The p
 
 ### Added
 
-- CodeQL security analysis for the Python and browser JavaScript code.
+- CodeQL security analysis for the shipped Python and browser JavaScript code, with test fixtures excluded from the
+  production alert set.
 - Dedicated package verification that builds both release formats, installs the wheel in isolation, and exercises the
   installed CLI entry point.
 - Documentation verification for broken repository-local Markdown links and image references.
