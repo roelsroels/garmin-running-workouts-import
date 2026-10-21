@@ -6,6 +6,7 @@ from pathlib import Path
 from garminworkouts.activities import ActivityArchive, ActivitySummary, AssessmentSelector
 from garminworkouts.fit_analysis import FitAnalyzer
 from garminworkouts.garmin.garminclient import GarminClient
+from garminworkouts.garmin.personalclient import PersonalGarminClient
 from garminworkouts.garmin.ratelimit import (
     GarminRateLimiter,
     GarminRateLimitError,
@@ -210,7 +211,7 @@ class InteractiveApp:
                 self.console.write("No active plan to refresh.")
             return []
         if connection is None:
-            with self._garmin_client() as managed_connection:
+            with self._activity_client() as managed_connection:
                 return self.refresh(silent=silent, connection=managed_connection)
         activities = self._fetch_activities(
             plan.start_date - timedelta(days=1),
@@ -290,7 +291,7 @@ class InteractiveApp:
         if not goal or not active_plan:
             raise ValueError("An active goal and finished plan are required")
 
-        with self._garmin_client() as connection:
+        with self._activity_client() as connection:
             self.refresh(silent=True, connection=connection)
             progress_rows = self.state.block_progress(active_plan.id)
             progress = self.state.block_progress_summary(active_plan.id)
@@ -342,7 +343,7 @@ class InteractiveApp:
         active_plan = self.state.active_plan()
         if not goal or not active_plan:
             raise ValueError("An active goal and plan are required")
-        with self._garmin_client() as connection:
+        with self._activity_client() as connection:
             self.refresh(silent=True, connection=connection)
             progress_rows = self.state.block_progress(active_plan.id)
             progress = self.state.block_progress_summary(active_plan.id)
@@ -406,12 +407,46 @@ class InteractiveApp:
     def settings(self):
         choice = self.console.choose(
             "Settings",
-            ["Update or reconnect Garmin", "Configure optional LLM", "Return"],
+            [
+                "Update or reconnect Garmin workout publishing",
+                "Configure Garmin activity source",
+                "Configure optional LLM",
+                "Return",
+            ],
         )
         if choice == 1:
             self.configure_garmin(test_connection=True)
         elif choice == 2:
+            self.configure_activity_source()
+        elif choice == 3:
             self.configure_llm()
+
+    def configure_activity_source(self):
+        current = self._activity_provider_key()
+        choice = self.console.choose(
+            "Activity and FIT source",
+            [
+                "Official Garmin Personal API (recommended for one runner)",
+                "Legacy authenticated Garmin Connect session",
+            ],
+            default=1 if current == "personal" else 2,
+        )
+        provider = "personal" if choice == 1 else "legacy"
+        if provider == "personal" and not self._personal_api_configured():
+            raise ValueError(
+                "Set GARMIN_PERSONAL_API_KEY in the protected environment before selecting the Personal API"
+            )
+        previous = self.state.get_setting("garmin_activity_provider", "legacy")
+        self.state.set_setting("garmin_activity_provider", provider)
+        try:
+            with self._activity_client() as connection:
+                connection.list_recent_activities(1)
+        except Exception:
+            self.state.set_setting("garmin_activity_provider", previous)
+            raise
+        self.state.record_event("garmin-activity-provider-selected", {"provider": provider})
+        label = "official Personal API" if provider == "personal" else "legacy Connect session"
+        self.console.write(f"Activity source changed to the {label} and tested successfully.")
 
     def clean_schedule_overlaps(self):
         active_record = self.state.active_plan()
@@ -734,7 +769,7 @@ class InteractiveApp:
     def _prepare_fit_analysis(self, activities, connection=None):
         try:
             if connection is None:
-                with self._garmin_client() as managed_connection:
+                with self._activity_client() as managed_connection:
                     analysis = prepare_fit_assessment(self.state, managed_connection, activities)
             else:
                 analysis = prepare_fit_assessment(self.state, connection, activities)
@@ -754,7 +789,7 @@ class InteractiveApp:
 
     def _fetch_activities(self, start_date, end_date, connection=None):
         if connection is None:
-            with self._garmin_client() as managed_connection:
+            with self._activity_client() as managed_connection:
                 raw = managed_connection.list_activities_by_date(
                     start_date.isoformat(), end_date.isoformat(), "running"
                 )
@@ -781,8 +816,42 @@ class InteractiveApp:
             prompt_mfa=self._prompt_garmin_mfa,
         )
 
+    def _activity_provider_key(self):
+        value = self.state.get_setting(
+            "garmin_activity_provider",
+            os.getenv("GARMIN_ACTIVITY_PROVIDER", "legacy"),
+        )
+        provider = str(value or "legacy").strip().casefold()
+        if provider not in {"legacy", "personal"}:
+            raise ValueError("GARMIN_ACTIVITY_PROVIDER must be 'legacy' or 'personal'")
+        return provider
+
+    @staticmethod
+    def _personal_api_configured():
+        key = str(os.getenv("GARMIN_PERSONAL_API_KEY", "")).strip()
+        return bool(key and key.casefold() not in {"unset", "none"})
+
+    def _activity_client(self):
+        if self._activity_provider_key() == "legacy":
+            return self._garmin_client()
+        if not self._personal_api_configured():
+            raise ValueError("GARMIN_PERSONAL_API_KEY is required for the official Personal API")
+        token_store = self.state.data_dir / "personal-api"
+        rate_limiter = GarminRateLimiter(token_store)
+        rate_limiter.check_cooldown()
+        return PersonalGarminClient(
+            os.getenv("GARMIN_PERSONAL_API_KEY"),
+            token_store,
+            rate_limiter=rate_limiter,
+        )
+
     def _refresh_if_possible(self):
-        if not self.state.active_plan() or not has_reusable_tokens(self.state.tokens_dir):
+        activity_access = (
+            self._personal_api_configured()
+            if self._activity_provider_key() == "personal"
+            else (has_reusable_tokens(self.state.tokens_dir))
+        )
+        if not self.state.active_plan() or not activity_access:
             return
         try:
             self.refresh(silent=True)

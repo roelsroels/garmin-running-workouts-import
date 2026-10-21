@@ -21,10 +21,10 @@ Connect and schedule them on their planned dates**. Use the web interface or int
 advanced use, not required for normal planning. This fork is intentionally running-only; use the upstream project for
 other sports.
 
-> The current release still uses authenticated Garmin Connect web endpoints through the actively maintained
-> `garminconnect` client. Garmin may change those private endpoints without notice. Garmin's new official Personal API
-> can cover activity/FIT imports, while workout and training-plan publication requires Business access and does not yet
-> publicly document every read/update/delete operation this tool uses. See the
+> Completed activity summaries and original FIT files can now be read through Garmin's **official Personal API**.
+> Structured-workout upload, calendar scheduling, revision, and cleanup still use authenticated Garmin Connect web
+> endpoints through the actively maintained `garminconnect` client until Business Starter Training API access is
+> available and verified. Garmin may change those private publishing endpoints without notice. See the
 > [official-API impact assessment and migration plan](docs/garmin-official-api-migration.md).
 
 Current release: **1.5.2** · [Changelog](CHANGELOG.md) · [Release notes](docs/releases/v1.5.2.md)
@@ -84,6 +84,7 @@ offers persistent Light and Dark overrides.
 - Preview-first retirement of old plans, including future-calendar cleanup and protected-plan handling.
 - Validation for ISO dates and watch-visible name collisions in the first 15 characters.
 - Chronological listing of completed Garmin activities with distance, duration, pace, and heart rate.
+- Selectable official Garmin Personal API source for a single runner's activity summaries and original FIT files.
 - Adaptive selection and automatic download of private original FIT assessment bundles.
 - Local decoding of FIT files with Garmin's official FIT SDK.
 - An interactive, goal-driven planner: no YAML editing is required for normal use.
@@ -165,6 +166,7 @@ The architecture-independent local state defaults to `~/.garmin-running-workouts
 
 - `state.sqlite3`: goals, plan history, workout status, cached execution scores, settings, and an audit trail;
 - `tokens/`: reusable Garmin session tokens;
+- `personal-api/`: a private, short-lived Personal API access-token cache (never the Personal API key);
 - `plans/`: generated, reviewable YAML plans;
 - `activities/`: private FIT assessment bundles and decoded JSON evidence.
 
@@ -368,6 +370,36 @@ The web MFA exchange needs the same in-memory Garmin client for both requests. K
 
 Unattended commands cannot safely answer an unexpected MFA prompt. Establish reusable tokens first through `./garmin-workouts` or the protected web settings page. Garmin authentication mechanisms are private and can change without notice.
 
+### Official Garmin Personal API for activity and FIT reads
+
+The Personal API is the recommended read source for a single runner. It replaces password/session access for completed
+activity summaries and original FIT downloads only. The existing Garmin Connect session remains necessary for creating,
+scheduling, revising, and deleting workout templates and calendar entries.
+
+1. Create a Personal API key in Garmin Connect. Garmin displays it once, so save it in your protected local or service
+   environment.
+2. Add these values to `.env` for the CLI or to the protected web-service environment file:
+
+   ```shell
+   GARMIN_ACTIVITY_PROVIDER=personal
+   GARMIN_PERSONAL_API_KEY=replace-with-your-personal-api-key
+   ```
+
+3. Restart the web service, open **Settings → Activity and FIT source**, select **Official Garmin Personal API**, and
+   click **Save and test source**. In the interactive CLI use **Settings → Configure Garmin activity source**.
+
+The API key is read only from the process environment: it is not stored in SQLite, the browser, logs, or generated plan
+files. The client exchanges it for Garmin's 24-hour OAuth2 access token, stores only that short-lived token in the private
+`personal-api/` directory, and renews it when needed. Deleting the Personal key in Garmin Connect revokes associated
+access tokens. The Personal API is for your own data and is not the authentication model for a multi-user service.
+
+The explicit `activities list`, `activities recommend`, and `activities prepare` commands also honor
+`GARMIN_ACTIVITY_PROVIDER=personal`. Workout-oriented commands such as `plan --apply`, `list`, and `delete` deliberately
+continue to use the Garmin Connect session.
+
+See Garmin's [Personal API FAQ](https://developer.garmin.com/gc-developer-program/personal/personal-faq/) and
+[Personal API Swagger reference](https://developer.garmin.com/gc-developer-program/personal/swagger-docs/).
+
 ### Garmin rate limiting
 
 Garmin Connect uses private, unpublished endpoints and may return HTTP 429 when an account or IP address sends too many requests. The client handles this conservatively:
@@ -426,7 +458,8 @@ cp .env.example .env
 chmod 600 .env
 ```
 
-Fill in `GARMIN_USERNAME` and `GARMIN_PASSWORD` in `.env`, then run. The CLI loads this local file automatically:
+Fill in `GARMIN_USERNAME` and `GARMIN_PASSWORD` in `.env`, then run. To use the official read path, also set
+`GARMIN_ACTIVITY_PROVIDER=personal` and `GARMIN_PERSONAL_API_KEY`. The CLI loads this local file automatically:
 
 ```shell
 ./garmin-workouts plan sample_plans/running-4-week-example.yaml --apply

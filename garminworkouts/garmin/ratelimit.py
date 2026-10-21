@@ -161,7 +161,7 @@ def _retry_after_seconds(error, now):
     while current is not None and id(current) not in seen:
         seen.add(id(current))
         response = getattr(current, "response", None)
-        headers = getattr(response, "headers", None)
+        headers = getattr(response, "headers", None) or getattr(current, "headers", None)
         if headers:
             value = headers.get("Retry-After") or headers.get("retry-after")
             if value:

@@ -11,6 +11,8 @@ Sources:
 
 - [DCRainmaker's announcement and tier overview](https://www.dcrainmaker.com/2026/10/garmin-connect-api-revamps-connect-developer.html)
 - [Garmin's current Personal, Starter and Enterprise overview](https://developer.garmin.com/gc-developer-program/overview/)
+- [Garmin Personal API FAQ](https://developer.garmin.com/gc-developer-program/personal/personal-faq/)
+- [Garmin Personal API Swagger reference](https://developer.garmin.com/gc-developer-program/personal/swagger-docs/)
 - [Garmin Connect Developer Program](https://developer.garmin.com/gc-developer-program/)
 - [Garmin Activity API](https://developer.garmin.com/gc-developer-program/activity-api/)
 - [Garmin Training API](https://developer.garmin.com/gc-developer-program/training-api/)
@@ -98,36 +100,40 @@ Before switching defaults, verify:
 - rate-limit responses and retry headers are respected; and
 - official Garmin attribution is added wherever required by the brand guidelines.
 
-## Preparation already present in the code
+## Implementation now present in the code
 
 `garminworkouts.garmin.provider` now records provider capabilities without altering the working login flow. The current
 web client declares the granular operations it supports. Official Personal, Starter and Enterprise profiles declare
 only behavior Garmin documents publicly, and tests prevent the application from accidentally treating Training API
 publication as equivalent to workout-library/calendar CRUD.
 
-This capability layer is deliberately small. No inactive “official client” or guessed endpoint payload has been added.
+`garminworkouts.garmin.personalclient` implements Garmin's published Personal API contract for activity search and
+original activity downloads. It exchanges the Personal key for a 24-hour OAuth2 access token, caches only that
+short-lived token in a private file, paginates activity searches, downloads original ZIP/FIT payloads, applies the
+existing conservative rate limiter, and sanitizes authentication and transport errors. Web and interactive CLI
+settings can select and test this read source; explicit `activities` commands honor the same environment setting.
+
+The Personal key itself stays in `GARMIN_PERSONAL_API_KEY` and is never stored in SQLite. Provider selection never
+changes the separate legacy client used to publish workouts and calendar entries.
 
 ## Implementation sequence after access is granted
 
-1. Register a Personal key and a Business Starter application; obtain the official reference, evaluation credentials,
-   webhook verification rules, scopes, quotas and example payloads.
-2. Capture sanitized contract fixtures for activity JSON/FIT, OAuth errors, Training API publication and any documented
+1. Use the implemented Personal provider in shadow comparisons against the legacy activity/FIT reader.
+2. When Business Starter access is granted, capture sanitized contract fixtures for OAuth, activity delivery, Training
+   API publication, and any documented
    update/delete callbacks.
-3. Implement an official Personal activity provider and compare its output with the existing activity summaries and FIT
-   bundles for the same runs.
-4. Implement OAuth 2.0 consent and the durable Starter activity inbox for multi-user installations.
-5. Implement an official Training API plan publisher against the neutral `TrainingPlan` model, including HR and pace
+3. Implement OAuth 2.0 consent and the durable Starter activity inbox for multi-user installations.
+4. Implement an official Training API plan publisher against the neutral `TrainingPlan` model, including HR and pace
    target conformance tests.
-6. Add provider selection and connection status to CLI/web settings. Keep the legacy provider as an opt-in fallback
-   during a measured migration.
-7. Run a shadow comparison: generate both payloads, publish only through the selected provider, and compare calendar,
+5. Add Starter provider selection and connection status while keeping the verified legacy publisher as a fallback.
+6. Run a shadow comparison: generate both payloads, publish only through the selected provider, and compare calendar,
    watch display and completed FIT evidence.
-8. Promote official providers only after create, revise, retire, rate-limit and token-refresh tests pass. Document any
+7. Promote official publishing only after create, revise, retire, rate-limit and token-refresh tests pass. Document any
    cleanup limitations prominently.
 
 ## Information still needed from Garmin
 
-- Exact Personal API authentication/token renewal semantics and quotas.
+- Personal API quotas and any unpublished burst limits.
 - Starter user limit and push delivery retention/retry guarantees.
 - Training API schema and supported running-step target types.
 - Whether published plans/workouts can be listed, updated, cancelled and deleted, and which IDs are returned.

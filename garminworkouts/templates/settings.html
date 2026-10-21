@@ -4,6 +4,19 @@
   <div class="page-heading"><div><p class="eyebrow">Connections</p><h1>Settings</h1><p>Secrets are never written to the planner database. The site itself should remain protected by nginx Basic Authentication.</p></div></div>
   <div class="settings-grid">
     <form class="card form-section" method="post" action="{{ url_for('connect_garmin') }}" data-loading-message="Connecting to Garmin…" data-loading-detail="Waiting for Garmin to authenticate and confirm the session."><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><div class="card-heading"><div><h2>Garmin Connect</h2><p class="muted">Status: {{ 'reusable session available' if values.connected else 'connection required' }}</p></div><span class="status-pill {{ 'safe' if values.connected else 'alert' }}">{{ 'Connected' if values.connected else 'Offline' }}</span></div><label>Username<input type="email" name="garmin_username" value="{{ values.garmin_username }}" autocomplete="username" required></label><label>Password<input type="password" name="garmin_password" autocomplete="current-password" required><small>Used only for this login request and not stored.</small></label><button class="button primary">Connect and test</button></form>
+    <form class="card form-section" method="post" action="{{ url_for('save_activity_source') }}" data-loading-message="Testing Garmin activity access…" data-loading-detail="Reading one activity to verify the selected source.">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <div class="card-heading"><div><h2>Activity and FIT source</h2><p class="muted">Choose how completed runs are read for assessment.</p></div><span class="status-pill {{ 'safe' if values.activity_provider == 'personal' and values.personal_api_configured else '' }}">{{ 'Official' if values.activity_provider == 'personal' else 'Legacy' }}</span></div>
+      <label>Provider
+        <select name="garmin_activity_provider">
+          <option value="personal" {% if values.activity_provider == 'personal' %}selected{% endif %}>Official Garmin Personal API</option>
+          <option value="legacy" {% if values.activity_provider == 'legacy' %}selected{% endif %}>Legacy authenticated Connect session</option>
+        </select>
+      </label>
+      <p class="help">Personal API key: {{ 'available from the service environment' if values.personal_api_configured else 'not configured' }}. Set <code>GARMIN_PERSONAL_API_KEY</code> in the protected service environment; the key is never stored in SQLite or sent to the browser.</p>
+      <p class="help">The Personal API reads your activity summaries and original FIT files. Structured workout upload, scheduling, revision, and cleanup still use the Garmin Connect session above.</p>
+      <button class="button secondary">Save and test source</button>
+    </form>
     <form class="card form-section" method="post" action="{{ url_for('save_llm_settings') }}" id="llm-settings" data-provider-defaults='{{ provider_defaults|tojson }}'>
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <h2>Optional LLM explanation</h2>

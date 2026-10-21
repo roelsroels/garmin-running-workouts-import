@@ -71,6 +71,18 @@ def test_retry_after_header_can_extend_default_cooldown(tmp_path):
     assert converted.retry_at == 2200.0
 
 
+def test_retry_after_header_is_read_from_urllib_http_error(tmp_path):
+    import urllib.error
+
+    clock = Clock()
+    limiter = _limiter(tmp_path, clock)
+    error = urllib.error.HTTPError("https://example.test", 429, "limited", {"Retry-After": "1200"}, None)
+
+    converted = limiter.record_rate_limited(error)
+
+    assert converted.retry_at == 2200.0
+
+
 def test_limiter_state_is_not_mistaken_for_authentication_tokens(tmp_path):
     token_store = tmp_path / "tokens"
     limiter = _limiter(tmp_path, Clock())

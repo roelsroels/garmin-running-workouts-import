@@ -8,6 +8,34 @@ from garminworkouts.state import AppState, Goal
 from garminworkouts.workflows import PlannerWorkflow
 
 
+def test_workflow_selects_official_personal_activity_source_without_changing_publisher(tmp_path, monkeypatch):
+    monkeypatch.setenv("GARMIN_PERSONAL_API_KEY", "personal-key")
+    personal = MagicMock()
+    constructor = MagicMock(return_value=personal)
+    monkeypatch.setattr("garminworkouts.workflows.PersonalGarminClient", constructor)
+
+    with AppState(tmp_path / "state") as state:
+        workflow = PlannerWorkflow(state)
+        state.set_setting("garmin_activity_provider", "personal")
+        assert workflow.activity_client() is personal
+
+    assert constructor.call_args.args[0] == "personal-key"
+    assert constructor.call_args.args[1].name == "personal-api"
+
+
+def test_workflow_activity_source_selection_is_tested_and_rolls_back_on_failure(tmp_path, monkeypatch):
+    monkeypatch.setenv("GARMIN_PERSONAL_API_KEY", "personal-key")
+    managed = MagicMock()
+    managed.__enter__.return_value.list_recent_activities.side_effect = RuntimeError("test failed")
+
+    with AppState(tmp_path / "state") as state:
+        workflow = PlannerWorkflow(state)
+        workflow.activity_client = MagicMock(return_value=managed)
+        with pytest.raises(RuntimeError, match="test failed"):
+            workflow.select_activity_provider("personal")
+        assert workflow.activity_provider_key() == "legacy"
+
+
 def test_workflow_web_login_preserves_normal_flow_and_defers_only_mfa(tmp_path, monkeypatch):
     ordinary = MagicMock(mfa_required=False)
     mfa = MagicMock(mfa_required=True)
@@ -151,7 +179,7 @@ def test_workflow_generates_next_block_after_refreshing_finished_plan(tmp_path):
         connection = MagicMock()
         managed = MagicMock()
         managed.__enter__.return_value = connection
-        workflow.garmin_client = MagicMock(return_value=managed)
+        workflow.activity_client = MagicMock(return_value=managed)
         workflow.refresh = MagicMock()
         workflow.fetch_recent_history = MagicMock(return_value=[])
         workflow._prepare_fit_analysis = MagicMock(return_value={"activities": [], "failures": []})

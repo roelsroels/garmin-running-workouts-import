@@ -7,6 +7,10 @@ All notable changes to Garmin Running Workouts Import are documented here. The p
 
 ### Added
 
+- Official Garmin Personal API activity/FIT ingestion, including documented API-key exchange, private short-lived
+  access-token caching, paginated activity search, original activity downloads, and conservative rate-limit handling.
+- Separate activity-source selection and live connection testing in the web and interactive CLI settings, while the
+  existing Garmin Connect session remains responsible for workout upload, scheduling, revision, and cleanup.
 - An official Garmin API impact assessment, capability matrix and staged migration plan for the new Personal, Business
   Starter and Business Enterprise access tiers.
 - Provider capability profiles that separate activity pull/push, FIT access, official training-plan publication and the

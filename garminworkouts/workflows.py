@@ -7,6 +7,7 @@ from pathlib import Path
 from garminworkouts.activities import ActivityArchive, ActivitySummary, AssessmentSelector
 from garminworkouts.fit_analysis import FitAnalyzer
 from garminworkouts.garmin.garminclient import GarminClient
+from garminworkouts.garmin.personalclient import PersonalGarminClient
 from garminworkouts.garmin.provider import CURRENT_ACTIVITY_REFRESH_CAPABILITIES, require_connection_capabilities
 from garminworkouts.garmin.ratelimit import GarminRateLimiter, GarminRateLimitError, has_reusable_tokens
 from garminworkouts.llm import LLMConfig, create_advisor
@@ -47,6 +48,54 @@ class PlannerWorkflow:
             token_store=str(token_store),
             rate_limiter=rate_limiter,
         )
+
+    def activity_provider_key(self):
+        configured = self.state.get_setting(
+            "garmin_activity_provider",
+            os.getenv("GARMIN_ACTIVITY_PROVIDER", "legacy"),
+        )
+        provider = str(configured or "legacy").strip().casefold()
+        if provider not in {"legacy", "personal"}:
+            raise ValueError("Garmin activity provider must be 'legacy' or 'personal'")
+        return provider
+
+    def personal_api_configured(self):
+        key = str(os.getenv("GARMIN_PERSONAL_API_KEY", "")).strip()
+        return bool(key and key.casefold() not in {"unset", "none"})
+
+    def activity_client(self):
+        if self.activity_provider_key() == "legacy":
+            return self.garmin_client()
+        if not self.personal_api_configured():
+            raise GarminAuthenticationRequiredError(
+                "The official Personal API is selected, but GARMIN_PERSONAL_API_KEY is not configured"
+            )
+        token_store = self.state.data_dir / "personal-api"
+        rate_limiter = GarminRateLimiter(token_store)
+        rate_limiter.check_cooldown()
+        return PersonalGarminClient(
+            os.getenv("GARMIN_PERSONAL_API_KEY"),
+            token_store,
+            rate_limiter=rate_limiter,
+        )
+
+    def select_activity_provider(self, provider, test=True):
+        provider = str(provider or "").strip().casefold()
+        if provider not in {"legacy", "personal"}:
+            raise ValueError("Choose either the legacy Connect session or official Personal API")
+        previous = self.state.get_setting("garmin_activity_provider")
+        self.state.set_setting("garmin_activity_provider", provider)
+        try:
+            if test:
+                with self.activity_client() as connection:
+                    connection.list_recent_activities(1)
+        except Exception:
+            if previous is None:
+                self.state.set_setting("garmin_activity_provider", "legacy")
+            else:
+                self.state.set_setting("garmin_activity_provider", previous)
+            raise
+        self.state.record_event("garmin-activity-provider-selected", {"provider": provider})
 
     def connect_garmin(self, username, password):
         username = str(username or "").strip()
@@ -108,7 +157,7 @@ class PlannerWorkflow:
 
     def fetch_activities(self, start_date, end_date, connection=None):
         if connection is None:
-            with self.garmin_client() as managed_connection:
+            with self.activity_client() as managed_connection:
                 raw = managed_connection.list_activities_by_date(
                     start_date.isoformat(), end_date.isoformat(), "running"
                 )
@@ -124,7 +173,7 @@ class PlannerWorkflow:
         if not plan:
             raise ValueError("There is no active plan to refresh")
         if connection is None:
-            with self.garmin_client() as managed_connection:
+            with self.activity_client() as managed_connection:
                 return self.refresh(connection=managed_connection)
         require_connection_capabilities(
             connection,
@@ -176,7 +225,7 @@ class PlannerWorkflow:
         if not goal or not active_plan:
             raise ValueError("An active goal and finished plan are required")
 
-        with self.garmin_client() as connection:
+        with self.activity_client() as connection:
             self.refresh(connection=connection)
             progress_rows = self.state.block_progress(active_plan.id)
             activities = self.fetch_recent_history(connection=connection)
@@ -205,7 +254,7 @@ class PlannerWorkflow:
         active_plan = self.state.active_plan()
         if not goal or not active_plan:
             raise ValueError("An active goal and plan are required")
-        with self.garmin_client() as connection:
+        with self.activity_client() as connection:
             self.refresh(connection=connection)
             progress_rows = self.state.block_progress(active_plan.id)
             progress = self.state.block_progress_summary(active_plan.id)

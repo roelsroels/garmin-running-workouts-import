@@ -21,6 +21,7 @@ from garminworkouts.app import (
 )
 from garminworkouts.calendar_export import build_calendar, upcoming_runs
 from garminworkouts.garmin.garminclient import GarminAuthenticationError, GarminTokenPersistenceError
+from garminworkouts.garmin.personalclient import GarminPersonalAuthenticationError
 from garminworkouts.garmin.ratelimit import GarminRateLimitError, has_reusable_tokens
 from garminworkouts.llm import PROVIDER_DEFAULTS, LLMConfig, create_advisor
 from garminworkouts.models.training_plan import TrainingPlan
@@ -144,6 +145,10 @@ def create_app(config=None):
     @app.errorhandler(GarminAuthenticationRequiredError)
     def authentication_error(error):
         return render_template("error.html", title="Garmin connection required", message=str(error)), 401
+
+    @app.errorhandler(GarminPersonalAuthenticationError)
+    def personal_authentication_error(error):
+        return render_template("error.html", title="Garmin Personal API access denied", message=str(error)), 401
 
     @app.errorhandler(GarminRateLimitError)
     def rate_limit_error(error):
@@ -501,9 +506,12 @@ def create_app(config=None):
     def settings():
         with _state(app) as state:
             config = LLMConfig.from_state(state)
+            workflow = PlannerWorkflow(state)
             values = {
                 "garmin_username": state.get_setting("garmin_username", ""),
                 "connected": has_reusable_tokens(state.tokens_dir),
+                "activity_provider": workflow.activity_provider_key(),
+                "personal_api_configured": workflow.personal_api_configured(),
                 "llm_provider": config.provider,
                 "llm_base_url": config.base_url,
                 "llm_model": config.model,
@@ -512,6 +520,15 @@ def create_app(config=None):
                 "llm_environment_key": config.enabled and bool(os.getenv(config.api_key_env)),
             }
         return render_template("settings.html", values=values, provider_defaults=PROVIDER_DEFAULTS)
+
+    @app.post("/settings/garmin/activity-source")
+    def save_activity_source():
+        provider = request.form.get("garmin_activity_provider", "legacy")
+        with _state(app) as state:
+            PlannerWorkflow(state).select_activity_provider(provider, test=True)
+        label = "official Personal API" if provider == "personal" else "legacy Connect session"
+        flash(f"The {label} is now the tested activity and FIT source.", "success")
+        return redirect(url_for("settings"))
 
     @app.post("/settings/garmin")
     def connect_garmin():

@@ -21,7 +21,8 @@ from garminworkouts.activities import (
 from garminworkouts.config import configreader
 from garminworkouts.fit_analysis import FitAnalyzer
 from garminworkouts.garmin.garminclient import GarminAuthenticationError, GarminClient, GarminMFARequiredError
-from garminworkouts.garmin.ratelimit import GarminRateLimitError, has_reusable_tokens
+from garminworkouts.garmin.personalclient import PersonalGarminClient
+from garminworkouts.garmin.ratelimit import GarminRateLimiter, GarminRateLimitError, has_reusable_tokens
 from garminworkouts.models.running_workout import RunningWorkout
 from garminworkouts.models.training_plan import TrainingPlan
 from garminworkouts.plan import PlanApplier, preview_plan
@@ -140,14 +141,14 @@ def command_delete(args):
 
 
 def command_activities_list(args):
-    with _garmin_client(args) as connection:
+    with _activity_client(args) as connection:
         activities = _fetch_activity_summaries(connection, args)
     for activity in activities:
         print(_format_activity_summary(activity))
 
 
 def command_activities_recommend(args):
-    with _garmin_client(args) as connection:
+    with _activity_client(args) as connection:
         selection = _assessment_selection(connection, args)
     suggested_command = None
     if selection.recommended_count:
@@ -165,7 +166,7 @@ def command_activities_recommend(args):
 
 
 def command_activities_prepare(args):
-    with _garmin_client(args) as connection:
+    with _activity_client(args) as connection:
         selection = _assessment_selection(connection, args)
         if not selection.activities:
             raise ValueError("No running activities are available to prepare")
@@ -332,6 +333,19 @@ def _garmin_client(args):
         token_store=args.token_store,
         prompt_mfa=_prompt_garmin_mfa,
     )
+
+
+def _activity_client(args):
+    provider = os.getenv("GARMIN_ACTIVITY_PROVIDER", "legacy").strip().casefold()
+    if provider == "legacy":
+        return _garmin_client(args)
+    if provider != "personal":
+        raise ValueError("GARMIN_ACTIVITY_PROVIDER must be 'legacy' or 'personal'")
+    api_key = os.getenv("GARMIN_PERSONAL_API_KEY", "")
+    token_store = Path(args.data_dir).expanduser().resolve() / "personal-api"
+    rate_limiter = GarminRateLimiter(token_store)
+    rate_limiter.check_cooldown()
+    return PersonalGarminClient(api_key, token_store, rate_limiter=rate_limiter)
 
 
 def _prompt_garmin_mfa():

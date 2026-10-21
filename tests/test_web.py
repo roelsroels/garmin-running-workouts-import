@@ -72,6 +72,34 @@ def test_web_garmin_login_without_mfa_keeps_existing_success_flow(tmp_path, monk
         assert "test-password" not in str(dict(browser_session))
 
 
+def test_web_selects_personal_activity_source_without_exposing_key(tmp_path, monkeypatch):
+    monkeypatch.setenv("GARMIN_PERSONAL_API_KEY", "personal-test-secret")
+    selected = []
+
+    def select(_workflow, provider, test=True):
+        selected.append((provider, test))
+
+    monkeypatch.setattr(PlannerWorkflow, "select_activity_provider", select)
+    app = _app(tmp_path)
+    client = app.test_client()
+    page = client.get("/settings")
+    assert page.status_code == 200
+    assert b"Official Garmin Personal API" in page.data
+    assert b"available from the service environment" in page.data
+    assert b"personal-test-secret" not in page.data
+
+    response = client.post(
+        "/settings/garmin/activity-source",
+        data={"csrf_token": _csrf(client), "garmin_activity_provider": "personal"},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"official Personal API" in response.data
+    assert selected == [("personal", True)]
+    assert b"personal-test-secret" not in response.data
+
+
 def test_web_garmin_mfa_is_browser_scoped_and_completes_without_storing_secrets(tmp_path, monkeypatch):
     connection = MagicMock()
     monkeypatch.setattr(PlannerWorkflow, "begin_garmin_login", lambda *_args: connection)
