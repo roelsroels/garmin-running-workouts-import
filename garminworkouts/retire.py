@@ -1,6 +1,11 @@
 from collections import defaultdict
 from datetime import date
 
+from garminworkouts.garmin.provider import (
+    CURRENT_PLAN_RETIRE_PREVIEW_CAPABILITIES,
+    GarminCapability,
+    require_connection_capabilities,
+)
 from garminworkouts.models.running_workout import RunningWorkout
 from garminworkouts.models.training_plan import TrainingPlan
 
@@ -28,6 +33,11 @@ class ScheduledConflictCleanup:
         self.today = today or date.today()
 
     def preview(self):
+        require_connection_capabilities(
+            self.connection,
+            "preview calendar cleanup",
+            *CURRENT_PLAN_RETIRE_PREVIEW_CAPABILITIES,
+        )
         entries = [entry for entry in self.replacement_plan.entries if entry["date"] >= self.today]
         target_dates = {entry["date"].isoformat() for entry in entries}
         protected_keys = {(entry["date"].isoformat(), entry["workout"].get_workout_name()) for entry in entries}
@@ -92,6 +102,10 @@ class ScheduledConflictCleanup:
         unresolved = [item for item in preview["calendar"] if item["action"] == "unresolved-schedule-id"]
         if unresolved:
             raise RuntimeError("Cannot replace schedules while a Garmin schedule ID is unresolved")
+        required = [GarminCapability.CALENDAR_UNSCHEDULE]
+        if delete_templates:
+            required.append(GarminCapability.WORKOUT_DELETE)
+        require_connection_capabilities(self.connection, "apply calendar cleanup", *required)
         actions = []
         for item in preview["calendar"]:
             self.connection.unschedule_workout(item["scheduled_workout_id"])
@@ -143,6 +157,11 @@ class PlanRetirement:
         self.delete_finished_templates = delete_finished_templates
 
     def preview(self):
+        require_connection_capabilities(
+            self.connection,
+            "preview plan retirement",
+            *CURRENT_PLAN_RETIRE_PREVIEW_CAPABILITIES,
+        )
         plan_entries = self.plan.entries
         target_names = {entry["workout"].get_workout_name() for entry in plan_entries}
         immutable_names = {
@@ -264,6 +283,13 @@ class PlanRetirement:
         if unresolved:
             raise RuntimeError("Cannot retire plan while a future Garmin schedule ID is unresolved")
 
+        if any(item["action"] == "unschedule" for item in report["calendar"]):
+            require_connection_capabilities(
+                self.connection,
+                "unschedule a retired plan",
+                GarminCapability.CALENDAR_UNSCHEDULE,
+            )
+
         actions = []
         for item in report["calendar"]:
             if item["action"] != "unschedule":
@@ -285,6 +311,12 @@ class PlanRetirement:
     def apply_templates(self, preview=None):
         """Delete only workout-library templates selected by a retirement preview."""
         report = preview or self.preview()
+        if any(item["action"] == "delete" for item in report["workouts"]):
+            require_connection_capabilities(
+                self.connection,
+                "delete retired workout templates",
+                GarminCapability.WORKOUT_DELETE,
+            )
         actions = []
         for item in report["workouts"]:
             if item["action"] != "delete":

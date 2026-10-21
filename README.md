@@ -21,7 +21,11 @@ Connect and schedule them on their planned dates**. Use the web interface or int
 advanced use, not required for normal planning. This fork is intentionally running-only; use the upstream project for
 other sports.
 
-> Garmin does not publish the web endpoints used by this tool. Garmin may change them without notice, and authentication can occasionally require maintenance. This fork uses the actively maintained `garminconnect` client for the current authenticated API.
+> The current release still uses authenticated Garmin Connect web endpoints through the actively maintained
+> `garminconnect` client. Garmin may change those private endpoints without notice. Garmin's new official Personal API
+> can cover activity/FIT imports, while workout and training-plan publication requires Business access and does not yet
+> publicly document every read/update/delete operation this tool uses. See the
+> [official-API impact assessment and migration plan](docs/garmin-official-api-migration.md).
 
 Current release: **1.5.2** · [Changelog](CHANGELOG.md) · [Release notes](docs/releases/v1.5.2.md)
 

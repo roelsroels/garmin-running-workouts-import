@@ -2,6 +2,7 @@ import json
 import time
 from collections import defaultdict
 
+from garminworkouts.garmin.provider import CURRENT_PLAN_APPLY_CAPABILITIES, require_connection_capabilities
 from garminworkouts.models.running_workout import RunningWorkout
 from garminworkouts.utils.functional import filter_empty
 
@@ -12,6 +13,10 @@ class PlanApplier:
         self.connection = connection
 
     def apply(self, schedule=True):
+        required = CURRENT_PLAN_APPLY_CAPABILITIES
+        if not schedule:
+            required = required[:3]
+        require_connection_capabilities(self.connection, "apply the current plan", *required)
         planned_workouts = self.plan.unique_workouts()
         planned_names = {workout.get_workout_name() for workout in planned_workouts}
         existing_by_name = self._existing_workouts_by_name(planned_names)

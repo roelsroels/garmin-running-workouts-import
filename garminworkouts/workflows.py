@@ -7,6 +7,7 @@ from pathlib import Path
 from garminworkouts.activities import ActivityArchive, ActivitySummary, AssessmentSelector
 from garminworkouts.fit_analysis import FitAnalyzer
 from garminworkouts.garmin.garminclient import GarminClient
+from garminworkouts.garmin.provider import CURRENT_ACTIVITY_REFRESH_CAPABILITIES, require_connection_capabilities
 from garminworkouts.garmin.ratelimit import GarminRateLimiter, GarminRateLimitError, has_reusable_tokens
 from garminworkouts.llm import LLMConfig, create_advisor
 from garminworkouts.models.training_plan import TrainingPlan
@@ -125,6 +126,11 @@ class PlannerWorkflow:
         if connection is None:
             with self.garmin_client() as managed_connection:
                 return self.refresh(connection=managed_connection)
+        require_connection_capabilities(
+            connection,
+            "refresh activities and FIT evidence",
+            *CURRENT_ACTIVITY_REFRESH_CAPABILITIES,
+        )
         activities = self.fetch_activities(
             plan.start_date - timedelta(days=1),
             self.today + timedelta(days=1),

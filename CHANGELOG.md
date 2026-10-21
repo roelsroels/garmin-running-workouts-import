@@ -7,6 +7,10 @@ All notable changes to Garmin Running Workouts Import are documented here. The p
 
 ### Added
 
+- An official Garmin API impact assessment, capability matrix and staged migration plan for the new Personal, Business
+  Starter and Business Enterprise access tiers.
+- Provider capability profiles that separate activity pull/push, FIT access, official training-plan publication and the
+  granular workout-library/calendar operations used by the existing web client, without changing its login flow.
 - CodeQL security analysis for the shipped Python and browser JavaScript code, with test fixtures excluded from the
   production alert set.
 - Dedicated package verification that builds both release formats, installs the wheel in isolation, and exercises the

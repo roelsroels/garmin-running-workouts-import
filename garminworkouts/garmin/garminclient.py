@@ -3,6 +3,7 @@ from pathlib import Path
 
 from garminconnect import GarminConnectAuthenticationError, GarminConnectTooManyRequestsError
 
+from garminworkouts.garmin.provider import LEGACY_WEB_PROVIDER
 from garminworkouts.garmin.ratelimit import GarminRateLimiter
 
 LOGIN_STRATEGIES = {
@@ -27,6 +28,8 @@ class GarminTokenPersistenceError(GarminAuthenticationError):
 
 
 class GarminClient:
+    provider_profile = LEGACY_WEB_PROVIDER
+
     def __init__(
         self,
         username,
