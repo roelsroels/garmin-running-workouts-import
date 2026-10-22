@@ -15,6 +15,10 @@ All notable changes to Garmin Running Workouts Import are documented here. The p
   Starter and Business Enterprise access tiers.
 - Provider capability profiles that separate activity pull/push, FIT access, official training-plan publication and the
   granular workout-library/calendar operations used by the existing web client, without changing its login flow.
+- An approved Business Starter OAuth 2.0/PKCE connection and an explicitly selectable official Training API publisher
+  for structured running workouts, calendar schedules, one-off workouts, revisions, and finished-block retirement.
+- A private user-bound remote-object registry that makes official publishing idempotent and restricts destructive
+  cleanup to workout and schedule IDs previously created by this application.
 - CodeQL security analysis for the shipped Python and browser JavaScript code, with test fixtures excluded from the
   production alert set.
 - Dedicated package verification that builds both release formats, installs the wheel in isolation, and exercises the

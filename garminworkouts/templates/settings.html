@@ -14,8 +14,41 @@
         </select>
       </label>
       <p class="help">Personal API key: {{ 'available from the service environment' if values.personal_api_configured else 'not configured' }}. Set <code>GARMIN_PERSONAL_API_KEY</code> in the protected service environment; the key is never stored in SQLite or sent to the browser.</p>
-      <p class="help">The Personal API reads your activity summaries and original FIT files. Structured workout upload, scheduling, revision, and cleanup still use the Garmin Connect session above.</p>
+      <p class="help">The Personal API reads your activity summaries and original FIT files. Workout publishing is selected separately below.</p>
       <button class="button secondary">Save and test source</button>
+    </form>
+    <section class="card form-section">
+      <div class="card-heading"><div><h2>Official Garmin Connect™ API</h2><p class="muted">OAuth connection for an approved Starter application.</p></div><span class="status-pill {{ 'safe' if values.starter_connected else 'alert' }}">{{ 'Connected' if values.starter_connected else 'Offline' }}</span></div>
+      {% if values.starter_connected %}
+        <p class="help">Connected user: <code>{{ values.starter_user_id }}</code></p>
+        <p class="help">Granted permissions: {{ values.starter_permissions|join(', ') if values.starter_permissions else 'none reported' }}</p>
+        <form method="post" action="{{ url_for('disconnect_starter') }}" data-confirm="Disconnect the official Garmin API account? Garmin will revoke this registration.">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button class="button secondary">Disconnect official API</button>
+        </form>
+      {% elif values.starter_api_configured %}
+        <p class="help">Client credentials are available from the protected service environment. The browser receives only Garmin's authorization page; the client secret and PKCE verifier remain server-side.</p>
+        <form method="post" action="{{ url_for('connect_starter') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button class="button primary">Connect with Garmin</button>
+        </form>
+      {% else %}
+        <p class="help">Configure <code>GARMIN_STARTER_CLIENT_ID</code>, <code>GARMIN_STARTER_CLIENT_SECRET</code>, and <code>GARMIN_STARTER_REDIRECT_URI</code> in the protected service environment.</p>
+      {% endif %}
+      <p class="help">The connection alone changes nothing. Select it as the workout publisher below after Garmin has granted <code>WORKOUT_IMPORT</code>.</p>
+    </section>
+    <form class="card form-section" method="post" action="{{ url_for('save_training_publisher') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <div class="card-heading"><div><h2>Workout and calendar publisher</h2><p class="muted">Choose how structured workouts are uploaded, scheduled, revised, and retired.</p></div><span class="status-pill {{ 'safe' if values.training_provider == 'starter' else '' }}">{{ 'Official' if values.training_provider == 'starter' else 'Legacy' }}</span></div>
+      <label>Provider
+        <select name="garmin_training_provider">
+          <option value="starter" {% if values.training_provider == 'starter' %}selected{% endif %}>Official Garmin Starter Training API</option>
+          <option value="legacy" {% if values.training_provider == 'legacy' %}selected{% endif %}>Legacy authenticated Connect session</option>
+        </select>
+      </label>
+      <p class="help">Official publishing requires the connected user to grant <code>WORKOUT_IMPORT</code>. It maintains a private registry of only the Garmin workout and schedule IDs created by this app, so cleanup never needs broad workout-library access.</p>
+      <p class="help">Changing providers does not migrate or delete existing workouts. New plans and one-off workouts use the selected publisher.</p>
+      <button class="button secondary">Save publisher</button>
     </form>
     <form class="card form-section" method="post" action="{{ url_for('save_llm_settings') }}" id="llm-settings" data-provider-defaults='{{ provider_defaults|tojson }}'>
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

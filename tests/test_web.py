@@ -8,6 +8,7 @@ from werkzeug.datastructures import MultiDict
 from garminworkouts.activities import ActivitySummary
 from garminworkouts.garmin.garminclient import GarminAuthenticationError
 from garminworkouts.garmin.ratelimit import GarminRateLimitError
+from garminworkouts.garmin.starterclient import OAuthAuthorization
 from garminworkouts.state import AppState, Goal
 from garminworkouts.web import create_app
 from garminworkouts.web_secrets import PendingGarminLogins
@@ -98,6 +99,99 @@ def test_web_selects_personal_activity_source_without_exposing_key(tmp_path, mon
     assert b"official Personal API" in response.data
     assert selected == [("personal", True)]
     assert b"personal-test-secret" not in response.data
+
+
+def test_web_selects_official_training_publisher_explicitly(tmp_path, monkeypatch):
+    selected = []
+    monkeypatch.setattr(PlannerWorkflow, "starter_connected", lambda _workflow: True)
+    monkeypatch.setattr(
+        PlannerWorkflow,
+        "select_training_provider",
+        lambda _workflow, provider: selected.append(provider),
+    )
+    client = _app(tmp_path).test_client()
+
+    page = client.get("/settings")
+    assert b"Workout and calendar publisher" in page.data
+    assert b"Official Garmin Starter Training API" in page.data
+
+    response = client.post(
+        "/settings/garmin/training-publisher",
+        data={"csrf_token": _csrf(client), "garmin_training_provider": "starter"},
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"official Starter API" in response.data
+    assert selected == ["starter"]
+
+
+def test_web_starter_oauth_keeps_secret_and_pkce_verifier_server_side(tmp_path, monkeypatch):
+    monkeypatch.setenv("GARMIN_STARTER_CLIENT_ID", "starter-client")
+    monkeypatch.setenv("GARMIN_STARTER_CLIENT_SECRET", "starter-secret")
+    monkeypatch.setenv(
+        "GARMIN_STARTER_REDIRECT_URI",
+        "https://planner.example.test/settings/garmin/starter/callback",
+    )
+    authorization = OAuthAuthorization(
+        "https://connect.garmin.com/oauth2Confirm?state=oauth-state",
+        "oauth-state",
+        "private-pkce-verifier",
+    )
+    completed = []
+    monkeypatch.setattr(PlannerWorkflow, "starter_connected", lambda _workflow: False)
+    monkeypatch.setattr(PlannerWorkflow, "begin_starter_authorization", lambda _workflow: authorization)
+
+    def complete(_workflow, code, verifier):
+        completed.append((code, verifier))
+        return {"user_id": "runner-id", "permissions": ("WORKOUT_IMPORT",)}
+
+    monkeypatch.setattr(PlannerWorkflow, "complete_starter_authorization", complete)
+    app = _app(tmp_path)
+    client = app.test_client()
+    settings = client.get("/settings")
+    assert settings.status_code == 200
+    assert b"Official Garmin Connect" in settings.data
+    assert b"starter-secret" not in settings.data
+
+    response = client.post(
+        "/settings/garmin/starter",
+        data={"csrf_token": _csrf(client)},
+    )
+    assert response.status_code == 302
+    assert response.headers["Location"] == authorization.url
+    with client.session_transaction() as browser_session:
+        assert browser_session["garmin_starter_oauth_state"] == "oauth-state"
+        assert "private-pkce-verifier" not in str(dict(browser_session))
+        assert "starter-secret" not in str(dict(browser_session))
+
+    response = client.get(
+        "/settings/garmin/starter/callback?state=oauth-state&code=authorization-code",
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert b"official Garmin API connection succeeded" in response.data
+    assert b"Workout import permission is active" in response.data
+    assert completed == [("authorization-code", "private-pkce-verifier")]
+    with client.session_transaction() as browser_session:
+        assert "garmin_starter_oauth_state" not in browser_session
+
+
+def test_web_starter_oauth_rejects_callback_state_mismatch(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        PlannerWorkflow,
+        "begin_starter_authorization",
+        lambda _workflow: OAuthAuthorization("https://connect.garmin.com/", "expected", "verifier"),
+    )
+    client = _app(tmp_path).test_client()
+    client.post("/settings/garmin/starter", data={"csrf_token": _csrf(client)})
+
+    response = client.get("/settings/garmin/starter/callback?state=attacker&code=code")
+
+    assert response.status_code == 400
+    assert b"authorization state was missing or invalid" in response.data
+    with client.session_transaction() as browser_session:
+        assert "garmin_starter_oauth_state" not in browser_session
 
 
 def test_web_garmin_mfa_is_browser_scoped_and_completes_without_storing_secrets(tmp_path, monkeypatch):

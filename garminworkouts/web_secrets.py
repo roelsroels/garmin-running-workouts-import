@@ -96,3 +96,34 @@ class PendingGarminLogins:
         entry = self._entries.pop(token, None)
         if entry:
             entry[1].close()
+
+
+class PendingOAuthAuthorizations:
+    """Short-lived PKCE verifiers kept server-side and keyed by OAuth state."""
+
+    def __init__(self, ttl=600, capacity=128):
+        self.ttl = ttl
+        self.capacity = capacity
+        self._entries = {}
+        self._lock = Lock()
+
+    def _purge(self):
+        now = time.monotonic()
+        self._entries = {state: entry for state, entry in self._entries.items() if entry[1] > now}
+
+    def put(self, state, code_verifier):
+        with self._lock:
+            self._purge()
+            if len(self._entries) >= self.capacity:
+                del self._entries[next(iter(self._entries))]
+            self._entries[str(state)] = (str(code_verifier), time.monotonic() + self.ttl)
+
+    def take(self, state):
+        with self._lock:
+            self._purge()
+            entry = self._entries.pop(str(state), None)
+            return entry[0] if entry else None
+
+    def remove(self, state):
+        with self._lock:
+            self._entries.pop(str(state), None)

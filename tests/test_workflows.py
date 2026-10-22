@@ -23,6 +23,60 @@ def test_workflow_selects_official_personal_activity_source_without_changing_pub
     assert constructor.call_args.args[1].name == "personal-api"
 
 
+def test_workflow_selects_official_training_publisher_only_with_permission(tmp_path, monkeypatch):
+    with AppState(tmp_path / "state") as state:
+        workflow = PlannerWorkflow(state)
+        monkeypatch.setattr(workflow, "starter_connected", lambda: True)
+        state.set_setting("garmin_starter_permissions", '["WORKOUT_IMPORT"]')
+
+        workflow.select_training_provider("starter")
+
+        assert workflow.training_provider_key() == "starter"
+        assert state.get_setting("garmin_activity_provider", "legacy") == "legacy"
+
+
+def test_workflow_rejects_official_training_publisher_without_permission(tmp_path, monkeypatch):
+    with AppState(tmp_path / "state") as state:
+        workflow = PlannerWorkflow(state)
+        monkeypatch.setattr(workflow, "starter_connected", lambda: True)
+        state.set_setting("garmin_starter_permissions", '["ACTIVITY_EXPORT"]')
+
+        with pytest.raises(ValueError, match="WORKOUT_IMPORT"):
+            workflow.select_training_provider("starter")
+
+        assert workflow.training_provider_key() == "legacy"
+
+
+def test_workflow_starter_oauth_uses_environment_and_records_only_identity(tmp_path, monkeypatch):
+    monkeypatch.setenv("GARMIN_STARTER_CLIENT_ID", "starter-client")
+    monkeypatch.setenv("GARMIN_STARTER_CLIENT_SECRET", "starter-secret")
+    monkeypatch.setenv("GARMIN_STARTER_REDIRECT_URI", "https://planner.example.test/callback")
+    official = MagicMock()
+    official.connection_status.return_value = {
+        "user_id": "runner-id",
+        "permissions": ("WORKOUT_IMPORT", "ACTIVITY_EXPORT"),
+    }
+    constructor = MagicMock(return_value=official)
+    monkeypatch.setattr("garminworkouts.workflows.StarterGarminClient", constructor)
+
+    with AppState(tmp_path / "state") as state:
+        workflow = PlannerWorkflow(state)
+        status = workflow.complete_starter_authorization("code", "verifier")
+        assert status["user_id"] == "runner-id"
+        assert state.get_setting("garmin_starter_user_id") == "runner-id"
+        assert state.get_setting("garmin_starter_permissions") == '["ACTIVITY_EXPORT", "WORKOUT_IMPORT"]'
+        database_text = state.database_path.read_bytes()
+
+    assert constructor.call_args.args[:3] == (
+        "starter-client",
+        "starter-secret",
+        "https://planner.example.test/callback",
+    )
+    official.exchange_code.assert_called_once_with("code", "verifier")
+    assert b"starter-secret" not in database_text
+    assert b"verifier" not in database_text
+
+
 def test_workflow_activity_source_selection_is_tested_and_rolls_back_on_failure(tmp_path, monkeypatch):
     monkeypatch.setenv("GARMIN_PERSONAL_API_KEY", "personal-key")
     managed = MagicMock()

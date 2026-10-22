@@ -7,9 +7,11 @@ from pathlib import Path
 from garminworkouts.activities import ActivityArchive, ActivitySummary, AssessmentSelector
 from garminworkouts.fit_analysis import FitAnalyzer
 from garminworkouts.garmin.garminclient import GarminClient
+from garminworkouts.garmin.official_training import OfficialObjectRegistry, OfficialTrainingPublisher
 from garminworkouts.garmin.personalclient import PersonalGarminClient
 from garminworkouts.garmin.provider import CURRENT_ACTIVITY_REFRESH_CAPABILITIES, require_connection_capabilities
 from garminworkouts.garmin.ratelimit import GarminRateLimiter, GarminRateLimitError, has_reusable_tokens
+from garminworkouts.garmin.starterclient import StarterGarminClient
 from garminworkouts.llm import LLMConfig, create_advisor
 from garminworkouts.models.training_plan import TrainingPlan
 from garminworkouts.plan import PlanApplier
@@ -77,6 +79,119 @@ class PlannerWorkflow:
             os.getenv("GARMIN_PERSONAL_API_KEY"),
             token_store,
             rate_limiter=rate_limiter,
+        )
+
+    def training_provider_key(self):
+        configured = self.state.get_setting(
+            "garmin_training_provider",
+            os.getenv("GARMIN_TRAINING_PROVIDER", "legacy"),
+        )
+        provider = str(configured or "legacy").strip().casefold()
+        if provider not in {"legacy", "starter"}:
+            raise ValueError("Garmin training provider must be 'legacy' or 'starter'")
+        return provider
+
+    def training_client(self):
+        if self.training_provider_key() == "legacy":
+            return self.garmin_client()
+        if not self.starter_connected():
+            raise GarminAuthenticationRequiredError("Connect the official Garmin Starter API account first")
+        permissions = self._starter_permissions()
+        if "WORKOUT_IMPORT" not in permissions:
+            raise GarminAuthenticationRequiredError(
+                "The connected official Garmin account has not granted WORKOUT_IMPORT permission"
+            )
+        return self.starter_client()
+
+    def select_training_provider(self, provider):
+        provider = str(provider or "").strip().casefold()
+        if provider not in {"legacy", "starter"}:
+            raise ValueError("Choose either the legacy Connect session or official Starter API")
+        if provider == "starter":
+            if not self.starter_connected():
+                raise GarminAuthenticationRequiredError("Connect the official Garmin Starter API account first")
+            if "WORKOUT_IMPORT" not in self._starter_permissions():
+                raise GarminAuthenticationRequiredError(
+                    "The connected official Garmin account has not granted WORKOUT_IMPORT permission"
+                )
+        self.state.set_setting("garmin_training_provider", provider)
+        self.state.record_event("garmin-training-provider-selected", {"provider": provider})
+
+    @staticmethod
+    def starter_api_configured():
+        return all(
+            str(os.getenv(name, "")).strip()
+            for name in (
+                "GARMIN_STARTER_CLIENT_ID",
+                "GARMIN_STARTER_CLIENT_SECRET",
+                "GARMIN_STARTER_REDIRECT_URI",
+            )
+        )
+
+    def starter_client(self):
+        if not self.starter_api_configured():
+            raise GarminAuthenticationRequiredError(
+                "Configure GARMIN_STARTER_CLIENT_ID, GARMIN_STARTER_CLIENT_SECRET, and "
+                "GARMIN_STARTER_REDIRECT_URI first"
+            )
+        token_store = self.state.data_dir / "starter-api"
+        return StarterGarminClient(
+            os.getenv("GARMIN_STARTER_CLIENT_ID"),
+            os.getenv("GARMIN_STARTER_CLIENT_SECRET"),
+            os.getenv("GARMIN_STARTER_REDIRECT_URI"),
+            token_store,
+            rate_limiter=GarminRateLimiter(token_store),
+        )
+
+    def starter_connected(self):
+        if not self.starter_api_configured():
+            return False
+        return self.starter_client().is_connected()
+
+    def begin_starter_authorization(self):
+        return self.starter_client().authorization()
+
+    def complete_starter_authorization(self, code, code_verifier):
+        client = self.starter_client()
+        client.exchange_code(code, code_verifier)
+        status = client.connection_status()
+        permissions = set(status["permissions"])
+        self.state.set_setting("garmin_starter_user_id", status["user_id"])
+        self.state.set_setting("garmin_starter_permissions", json.dumps(sorted(permissions)))
+        self.state.record_event(
+            "garmin-starter-connected",
+            {"user_id": status["user_id"], "permissions": sorted(permissions)},
+        )
+        return status
+
+    def disconnect_starter(self):
+        self.starter_client().disconnect()
+        self.state.set_setting("garmin_starter_user_id", "")
+        self.state.set_setting("garmin_starter_permissions", "[]")
+        if self.training_provider_key() == "starter":
+            self.state.set_setting("garmin_training_provider", "legacy")
+        self.state.record_event("garmin-starter-disconnected", {})
+
+    def _starter_permissions(self):
+        try:
+            value = json.loads(self.state.get_setting("garmin_starter_permissions", "[]"))
+        except (TypeError, ValueError):
+            return set()
+        return {str(item) for item in value} if isinstance(value, list) else set()
+
+    def _official_registry(self):
+        return OfficialObjectRegistry(
+            self.state.data_dir / "starter-api",
+            self.state.get_setting("garmin_starter_user_id", ""),
+        )
+
+    def _official_publisher(self, plan, connection, plan_id):
+        return OfficialTrainingPublisher(
+            plan,
+            connection,
+            self._official_registry(),
+            plan_id,
+            today=self.today,
         )
 
     def select_activity_provider(self, provider, test=True):
@@ -286,8 +401,11 @@ class PlannerWorkflow:
     def inspect_plan_conflicts(self, record):
         self._validate_replacement(record)
         plan = TrainingPlan(record.config)
-        with self.garmin_client() as connection:
-            preview = ScheduledConflictCleanup(plan, connection, today=self.today).preview()
+        with self.training_client() as connection:
+            if self.training_provider_key() == "starter":
+                preview = self._official_publisher(plan, connection, record.id).preview_conflicts()
+            else:
+                preview = ScheduledConflictCleanup(plan, connection, today=self.today).preview()
         self._write_private_json(self._plan_conflict_path(record.id), preview)
         return preview
 
@@ -301,14 +419,23 @@ class PlannerWorkflow:
         old_record = self.state.plan(record.supersedes_plan_id) if record.supersedes_plan_id else None
         changes_started = False
         try:
-            with self.garmin_client() as connection:
-                self._verify_conflict_preview(new_plan, connection, preview)
+            with self.training_client() as connection:
+                official = self.training_provider_key() == "starter"
+                publisher = self._official_publisher(new_plan, connection, record.id) if official else None
+                self._verify_conflict_preview(new_plan, connection, preview, plan_id=record.id)
                 changes_started = True
-                apply_actions = PlanApplier(new_plan, connection).apply(schedule=True)
+                apply_actions = (
+                    publisher.apply(schedule=True)
+                    if publisher
+                    else PlanApplier(new_plan, connection).apply(schedule=True)
+                )
                 conflict_actions = []
                 if remove_conflicts:
-                    cleanup = ScheduledConflictCleanup(new_plan, connection, today=self.today)
-                    conflict_actions = cleanup.apply(preview, delete_templates=delete_templates)
+                    if publisher:
+                        conflict_actions = publisher.apply_conflicts(preview, delete_templates=delete_templates)
+                    else:
+                        cleanup = ScheduledConflictCleanup(new_plan, connection, today=self.today)
+                        conflict_actions = cleanup.apply(preview, delete_templates=delete_templates)
                 retirement_actions = []
                 if old_record:
                     old_plan_finished = self.plan_is_finished(old_record)
@@ -320,15 +447,24 @@ class PlannerWorkflow:
                         if old_plan_finished
                         else TrainingPlan(old_record.config)
                     )
-                    retirement = PlanRetirement(
-                        old_plan,
-                        connection,
-                        protected_plans=[new_plan],
-                        today=self.today,
-                        immutable_workouts=immutable_workout_keys(self.state.progress(old_record.id)),
-                        delete_finished_templates=old_plan_finished,
-                    )
-                    retirement_actions = retirement.apply(retirement.preview())
+                    if publisher:
+                        old_plan_ids = [item.id for item in self.state.block_lineage(old_record.id)]
+                        retirement_actions = publisher.retire(
+                            old_plan,
+                            old_plan_ids,
+                            protected_plan=new_plan,
+                            delete_finished_templates=old_plan_finished,
+                        )
+                    else:
+                        retirement = PlanRetirement(
+                            old_plan,
+                            connection,
+                            protected_plans=[new_plan],
+                            today=self.today,
+                            immutable_workouts=immutable_workout_keys(self.state.progress(old_record.id)),
+                            delete_finished_templates=old_plan_finished,
+                        )
+                        retirement_actions = retirement.apply(retirement.preview())
         except GarminRateLimitError:
             raise
         except Exception as exc:
@@ -392,8 +528,11 @@ class PlannerWorkflow:
         if not record:
             raise ValueError("There is no active plan to protect during cleanup")
         plan = TrainingPlan(record.config)
-        with self.garmin_client() as connection:
-            preview = ScheduledConflictCleanup(plan, connection, today=self.today).preview()
+        with self.training_client() as connection:
+            if self.training_provider_key() == "starter":
+                preview = self._official_publisher(plan, connection, record.id).preview_conflicts()
+            else:
+                preview = ScheduledConflictCleanup(plan, connection, today=self.today).preview()
         self._write_private_json(self._cleanup_conflict_path(record.id), preview)
         return record, preview
 
@@ -405,12 +544,17 @@ class PlannerWorkflow:
         if unresolved:
             raise ValueError("One or more Garmin entries lack a schedule ID; no changes were made")
         plan = TrainingPlan(record.config)
-        with self.garmin_client() as connection:
-            self._verify_conflict_preview(plan, connection, preview)
-            actions = ScheduledConflictCleanup(plan, connection, today=self.today).apply(
-                preview,
-                delete_templates=delete_templates,
-            )
+        with self.training_client() as connection:
+            self._verify_conflict_preview(plan, connection, preview, plan_id=record.id)
+            if self.training_provider_key() == "starter":
+                actions = self._official_publisher(plan, connection, record.id).apply_conflicts(
+                    preview, delete_templates=delete_templates
+                )
+            else:
+                actions = ScheduledConflictCleanup(plan, connection, today=self.today).apply(
+                    preview,
+                    delete_templates=delete_templates,
+                )
         self.state.record_event(
             "schedule-overlaps-cleaned-from-web",
             {"active_plan_id": record.id, "actions": actions},
@@ -421,15 +565,20 @@ class PlannerWorkflow:
         record, previous = self._finished_previous_block()
         active_plan = combined_training_plan(self.state.block_lineage(record.id), name=record.name)
         previous_plan = combined_training_plan(self.state.block_lineage(previous.id), name=previous.name)
-        with self.garmin_client() as connection:
-            preview = PlanRetirement(
-                previous_plan,
-                connection,
-                protected_plans=[active_plan],
-                today=self.today,
-                immutable_workouts=immutable_workout_keys(self.state.progress(previous.id)),
-                delete_finished_templates=True,
-            ).preview()
+        with self.training_client() as connection:
+            if self.training_provider_key() == "starter":
+                preview = self._official_publisher(active_plan, connection, record.id).preview_retirement_templates(
+                    previous_plan, protected_plan=active_plan
+                )
+            else:
+                preview = PlanRetirement(
+                    previous_plan,
+                    connection,
+                    protected_plans=[active_plan],
+                    today=self.today,
+                    immutable_workouts=immutable_workout_keys(self.state.progress(previous.id)),
+                    delete_finished_templates=True,
+                ).preview()
         self._write_private_json(self._obsolete_cleanup_path(record.id), preview)
         return record, previous, preview
 
@@ -442,19 +591,27 @@ class PlannerWorkflow:
             raise ValueError("The active plan changed after inspection. Inspect the cleanup again.")
         active_plan = combined_training_plan(self.state.block_lineage(current.id), name=current.name)
         previous_plan = combined_training_plan(self.state.block_lineage(previous.id), name=previous.name)
-        with self.garmin_client() as connection:
-            retirement = PlanRetirement(
-                previous_plan,
-                connection,
-                protected_plans=[active_plan],
-                today=self.today,
-                immutable_workouts=immutable_workout_keys(self.state.progress(previous.id)),
-                delete_finished_templates=True,
-            )
-            preview = retirement.preview()
+        with self.training_client() as connection:
+            if self.training_provider_key() == "starter":
+                retirement = self._official_publisher(active_plan, connection, current.id)
+                preview = retirement.preview_retirement_templates(previous_plan, protected_plan=active_plan)
+            else:
+                retirement = PlanRetirement(
+                    previous_plan,
+                    connection,
+                    protected_plans=[active_plan],
+                    today=self.today,
+                    immutable_workouts=immutable_workout_keys(self.state.progress(previous.id)),
+                    delete_finished_templates=True,
+                )
+                preview = retirement.preview()
             if preview != expected:
                 raise ValueError("The Garmin workout library changed after inspection. Inspect the cleanup again.")
-            actions = retirement.apply_templates(preview)
+            actions = (
+                retirement.apply_retirement_templates(preview)
+                if self.training_provider_key() == "starter"
+                else retirement.apply_templates(preview)
+            )
         self.state.record_event(
             "finished-block-templates-cleaned-from-web",
             {"active_plan_id": current.id, "previous_plan_id": previous.id, "actions": actions},
@@ -499,8 +656,11 @@ class PlannerWorkflow:
 
     def inspect_one_off_conflicts(self, draft_id):
         plan = TrainingPlan(self.load_one_off_draft(draft_id))
-        with self.garmin_client() as connection:
-            preview = ScheduledConflictCleanup(plan, connection, today=self.today).preview()
+        with self.training_client() as connection:
+            if self.training_provider_key() == "starter":
+                preview = self._official_publisher(plan, connection, f"one-off:{draft_id}").preview_conflicts()
+            else:
+                preview = ScheduledConflictCleanup(plan, connection, today=self.today).preview()
         self._write_private_json(self._draft_conflict_path(draft_id), preview)
         return preview
 
@@ -512,14 +672,25 @@ class PlannerWorkflow:
         self._validate_conflict_choice(preview, remove_conflicts, delete_templates, allow_duplicates)
         config = self.load_one_off_draft(draft_id)
         plan = TrainingPlan(config)
-        with self.garmin_client() as connection:
-            self._verify_conflict_preview(plan, connection, preview)
-            apply_actions = PlanApplier(plan, connection).apply(schedule=True)
+        with self.training_client() as connection:
+            publisher = (
+                self._official_publisher(plan, connection, f"one-off:{draft_id}")
+                if self.training_provider_key() == "starter"
+                else None
+            )
+            self._verify_conflict_preview(plan, connection, preview, plan_id=f"one-off:{draft_id}")
+            apply_actions = (
+                publisher.apply(schedule=True) if publisher else PlanApplier(plan, connection).apply(schedule=True)
+            )
             conflict_actions = []
             if remove_conflicts:
-                conflict_actions = ScheduledConflictCleanup(plan, connection, today=self.today).apply(
-                    preview,
-                    delete_templates=delete_templates,
+                conflict_actions = (
+                    publisher.apply_conflicts(preview, delete_templates=delete_templates)
+                    if publisher
+                    else ScheduledConflictCleanup(plan, connection, today=self.today).apply(
+                        preview,
+                        delete_templates=delete_templates,
+                    )
                 )
         workout = config["workouts"][0]
         self.state.record_event(
@@ -602,8 +773,11 @@ class PlannerWorkflow:
         if count and not remove_conflicts and not allow_duplicates:
             raise ValueError("Explicitly remove the conflicts or acknowledge that duplicate dates may remain")
 
-    def _verify_conflict_preview(self, plan, connection, expected):
-        current = ScheduledConflictCleanup(plan, connection, today=self.today).preview()
+    def _verify_conflict_preview(self, plan, connection, expected, plan_id="verification"):
+        if self.training_provider_key() == "starter":
+            current = self._official_publisher(plan, connection, plan_id).preview_conflicts()
+        else:
+            current = ScheduledConflictCleanup(plan, connection, today=self.today).preview()
         if current != expected:
             raise ValueError("The Garmin schedule changed after inspection. Inspect it again before applying.")
 

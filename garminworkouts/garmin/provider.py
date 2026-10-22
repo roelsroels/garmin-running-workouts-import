@@ -95,9 +95,9 @@ LEGACY_WEB_PROVIDER = GarminProviderProfile(
     ),
 )
 
-# Public Garmin documentation, checked 2026-10-21, describes only these
-# capabilities for each official tier.  Do not add read/update/delete semantics
-# to the Training API profiles until Garmin's gated reference confirms them.
+# Garmin's official program contracts distinguish activity delivery from
+# training publication. Keep those capabilities explicit so an official
+# provider is never treated as if it were the authenticated web client.
 OFFICIAL_PERSONAL_PROVIDER = GarminProviderProfile(
     key="garmin-connect-official-personal",
     name="Official Garmin Connect Personal API",
@@ -118,6 +118,12 @@ OFFICIAL_STARTER_PROVIDER = GarminProviderProfile(
         {
             GarminCapability.ACTIVITY_PUSH,
             GarminCapability.ACTIVITY_FIT_DOWNLOAD,
+            GarminCapability.WORKOUT_CREATE,
+            GarminCapability.WORKOUT_UPDATE,
+            GarminCapability.WORKOUT_DELETE,
+            GarminCapability.CALENDAR_READ,
+            GarminCapability.CALENDAR_SCHEDULE,
+            GarminCapability.CALENDAR_UNSCHEDULE,
             GarminCapability.TRAINING_PLAN_PUBLISH,
         }
     ),
@@ -133,6 +139,12 @@ OFFICIAL_ENTERPRISE_PROVIDER = GarminProviderProfile(
             GarminCapability.ACTIVITY_PUSH,
             GarminCapability.ACTIVITY_FIT_DOWNLOAD,
             GarminCapability.ACTIVITY_HISTORICAL_BACKFILL,
+            GarminCapability.WORKOUT_CREATE,
+            GarminCapability.WORKOUT_UPDATE,
+            GarminCapability.WORKOUT_DELETE,
+            GarminCapability.CALENDAR_READ,
+            GarminCapability.CALENDAR_SCHEDULE,
+            GarminCapability.CALENDAR_UNSCHEDULE,
             GarminCapability.TRAINING_PLAN_PUBLISH,
         }
     ),

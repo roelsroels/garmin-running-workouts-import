@@ -21,10 +21,10 @@ Connect and schedule them on their planned dates**. Use the web interface or int
 advanced use, not required for normal planning. This fork is intentionally running-only; use the upstream project for
 other sports.
 
-> Completed activity summaries and original FIT files can now be read through Garmin's **official Personal API**.
-> Structured-workout upload, calendar scheduling, revision, and cleanup still use authenticated Garmin Connect web
-> endpoints through the actively maintained `garminconnect` client until Business Starter Training API access is
-> available and verified. Garmin may change those private publishing endpoints without notice. See the
+> Completed activity summaries and original FIT files can be read through Garmin's **official Personal API**.
+> Approved Business Starter applications can also publish, schedule, revise, and retire structured workouts through
+> Garmin's **official Training API**. Both integrations are explicit opt-ins; the existing authenticated Garmin Connect
+> provider remains the default and fallback. Garmin may change those private legacy endpoints without notice. See the
 > [official-API impact assessment and migration plan](docs/garmin-official-api-migration.md).
 
 Current release: **1.5.2** · [Changelog](CHANGELOG.md) · [Release notes](docs/releases/v1.5.2.md)
@@ -399,6 +399,45 @@ continue to use the Garmin Connect session.
 
 See Garmin's [Personal API FAQ](https://developer.garmin.com/gc-developer-program/personal/personal-faq/) and
 [Personal API Swagger reference](https://developer.garmin.com/gc-developer-program/personal/swagger-docs/).
+
+### Approved Garmin Starter development connection
+
+An approved Garmin Connect Developer Program Starter application can be connected through the protected web settings
+page. Activity ingestion and workout publishing are independently selectable, so the Personal API can remain the FIT
+source while the official Training API publishes plans.
+
+1. Register this exact HTTPS callback URI for the application:
+
+   ```text
+   https://planner.example.com/settings/garmin/starter/callback
+   ```
+
+2. Configure the matching server-side values in the protected service environment:
+
+   ```shell
+   GARMIN_STARTER_CLIENT_ID=replace-with-the-client-id
+   GARMIN_STARTER_CLIENT_SECRET=replace-with-the-client-secret
+   GARMIN_STARTER_REDIRECT_URI=https://planner.example.com/settings/garmin/starter/callback
+   ```
+
+3. Restart the service and use **Settings → Official Garmin Connect™ API → Connect with Garmin**.
+4. Confirm that Garmin reports <code>WORKOUT_IMPORT</code>, then choose **Settings → Workout and calendar publisher →
+   Official Garmin Starter Training API**.
+
+The authorization flow uses OAuth 2.0 with PKCE. The client secret and PKCE verifier remain on the server; rotating
+access and refresh tokens are stored with private filesystem permissions under the planner data directory. The Settings
+page shows the granted Garmin permissions after consent. The publisher translates the neutral running model to Garmin's
+official time, distance, open, repeat, pace, and heart-rate steps. It records only the remote workout and schedule IDs it
+created in the private `starter-api/remote-objects.json` registry. Updates are idempotent, replacement conflicts remain
+preview-and-approve operations, and deletion is limited to registry-owned objects. The legacy publisher remains the
+default until an administrator explicitly selects the official provider.
+
+Do not delete `remote-objects.json` while official workouts are still managed by the application: the Training API has
+no workout-library listing endpoint with which to reconstruct that ownership record. Changing providers does not
+migrate or remove workouts created through the other provider.
+
+Every deployment must use its own approved Garmin application credentials. Never commit the client secret, generated
+tokens, or Garmin's gated program materials to this repository.
 
 ### Garmin rate limiting
 

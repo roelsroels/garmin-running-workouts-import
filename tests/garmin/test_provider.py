@@ -27,9 +27,18 @@ def test_official_personal_profile_can_import_but_not_publish_training():
     assert not OFFICIAL_PERSONAL_PROVIDER.supports(*CURRENT_PLAN_APPLY_CAPABILITIES)
 
 
-def test_official_business_profiles_use_plan_publish_not_legacy_calendar_crud():
+def test_official_business_profiles_support_training_crud_without_library_listing():
     assert OFFICIAL_STARTER_PROVIDER.supports(GarminCapability.TRAINING_PLAN_PUBLISH)
     assert OFFICIAL_ENTERPRISE_PROVIDER.supports(GarminCapability.TRAINING_PLAN_PUBLISH)
+    assert OFFICIAL_STARTER_PROVIDER.supports(
+        GarminCapability.WORKOUT_CREATE,
+        GarminCapability.WORKOUT_UPDATE,
+        GarminCapability.WORKOUT_DELETE,
+        GarminCapability.CALENDAR_READ,
+        GarminCapability.CALENDAR_SCHEDULE,
+        GarminCapability.CALENDAR_UNSCHEDULE,
+    )
+    assert not OFFICIAL_STARTER_PROVIDER.supports(GarminCapability.WORKOUT_LIBRARY_READ)
     assert not OFFICIAL_STARTER_PROVIDER.supports(*CURRENT_PLAN_APPLY_CAPABILITIES)
     assert not OFFICIAL_ENTERPRISE_PROVIDER.supports(*CURRENT_PLAN_RETIRE_CAPABILITIES)
 

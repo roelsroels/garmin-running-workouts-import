@@ -29,9 +29,9 @@ Sources:
   JSON/FIT for a limited user population, but activity delivery is push-only and historical backfill is not included.
 - **Enterprise is only required by documented scale or history needs.** Garmin lists push or ping/pull delivery, at
   least one month of historical data, unlimited users and support at that tier.
-- **A full migration cannot be implemented responsibly from the public marketing pages alone.** The request/response
-  schemas, OAuth application credentials and precise Training API lifecycle semantics are available after Garmin grants
-  program access.
+- **The approved Starter reference resolves the main protocol questions.** It confirms server-side OAuth 2.0 with PKCE,
+  rotating refresh tokens, running-step targets, and workout/schedule lifecycle operations. The official publisher is
+  implemented as an explicit opt-in while the legacy publisher remains the default.
 
 ## Capability mapping
 
@@ -41,12 +41,13 @@ Sources:
 | Download activity FIT | Yes | Yes | Yes, for delivered activities | Yes |
 | Historical first-run assessment | Yes | Not explicitly constrained publicly | No | At least one month |
 | Publish workouts/training plans | Yes, via private workout endpoints | No | Yes, Training API | Yes, Training API |
-| Read/update/delete workout-library templates | Yes | No | Not stated publicly | Not stated publicly |
-| Read/unschedule individual calendar entries | Yes | No | Not stated publicly | Not stated publicly |
+| Read/update/delete known workout templates | Yes | No | Yes by ID; no library listing | Yes by ID; no library listing |
+| Read/update/unschedule calendar entries | Yes | No | Yes by ID/date range | Yes by ID/date range |
 | Username/password/MFA login | Yes | Replaced by API key/access token | Replaced by OAuth 2.0 consent | Replaced by OAuth 2.0 consent |
 
-“Not stated publicly” is intentionally different from “not supported.” The application must not promise those operations
-until they are confirmed in Garmin's gated API reference and verified in its evaluation environment.
+The official Training API does not expose the same library-list operation used by the legacy client. The application
+must therefore track IDs it creates and use date-range schedule reads rather than pretending the two providers are
+interchangeable.
 
 ## Architectural consequences
 
@@ -63,24 +64,25 @@ until an approved Business application is available.
 
 ### 2. Add an asynchronous Business activity inbox
 
-Starter activity delivery is push-only. The web service therefore needs a signed webhook endpoint, durable event
-storage, idempotency keys and a processing queue or retryable inbox. `fetch_recent_history()` cannot simply call a list
-endpoint under that tier. The CLI can consume activities already stored by the web service, but cannot receive pushes
-while it is offline.
+Starter activity delivery is push-only. The web service therefore needs a durable webhook inbox, idempotency keys and
+immediate acknowledgement before asynchronous processing. Original activity files are delivered through short-lived,
+single-use callback URLs, so they must be downloaded and stored promptly. `fetch_recent_history()` cannot simply call a
+list endpoint under that tier. The CLI can consume activities already stored by the web service, but cannot receive
+pushes while it is offline.
 
 ### 3. Implement Training API publication as a separate plan strategy
 
 The current `PlanApplier` creates or updates workout-library templates, resolves their IDs, then schedules each one.
-Garmin describes the official API as publishing workouts and training plans to the calendar. The official implementation
-should translate the project's neutral plan model directly to the Training API instead of emulating the current private
-CRUD sequence.
+The official implementation translates the project's neutral plan model directly to the Training API. Running time,
+distance and open steps; repeats; warm-up, cooldown, recovery and interval intensity; heart-rate ranges/zones; and pace
+ranges all have direct representations. The API limits a single-sport workout to 100 steps.
 
 ### 4. Keep cleanup conservative
 
 Replacement and retirement currently depend on listing templates and calendar entries, then deleting or unscheduling
-specific Garmin IDs after user approval. Until the official API confirms equivalent lifecycle operations, an official
-publisher must track every remote ID it creates locally and must not claim that it can discover or remove unrelated
-Garmin content. If delete/replace is unavailable, the UI must say so before applying a revision.
+specific Garmin IDs after user approval. The official API supports update/delete by known ID and schedule retrieval by
+date range, but not a workout-library listing. An official publisher must therefore track every remote ID it creates
+locally and must not claim that it can discover an unscheduled, unrelated Garmin workout.
 
 ### 5. Replace stored Garmin passwords with scoped credentials
 
@@ -113,32 +115,38 @@ short-lived token in a private file, paginates activity searches, downloads orig
 existing conservative rate limiter, and sanitizes authentication and transport errors. Web and interactive CLI
 settings can select and test this read source; explicit `activities` commands honor the same environment setting.
 
-The Personal key itself stays in `GARMIN_PERSONAL_API_KEY` and is never stored in SQLite. Provider selection never
-changes the separate legacy client used to publish workouts and calendar entries.
+The Personal key itself stays in `GARMIN_PERSONAL_API_KEY` and is never stored in SQLite. Activity-source selection and
+training-publisher selection are independent.
 
-## Implementation sequence after access is granted
+`garminworkouts.garmin.starterclient` now implements the server-side authorization-code/PKCE exchange, private rotating
+token storage, identity and permission checks, conservative rate-limit handling, and the official workout/schedule
+operations. The protected web Settings page can initiate and complete consent without placing the client secret or PKCE
+verifier in the browser. `garminworkouts.garmin.training_payload` maps the neutral running model to official time,
+distance, open, repeat, heart-rate and pace steps.
 
-1. Use the implemented Personal provider in shadow comparisons against the legacy activity/FIT reader.
-2. When Business Starter access is granted, capture sanitized contract fixtures for OAuth, activity delivery, Training
-   API publication, and any documented
-   update/delete callbacks.
-3. Implement OAuth 2.0 consent and the durable Starter activity inbox for multi-user installations.
-4. Implement an official Training API plan publisher against the neutral `TrainingPlan` model, including HR and pace
-   target conformance tests.
-5. Add Starter provider selection and connection status while keeping the verified legacy publisher as a fallback.
-6. Run a shadow comparison: generate both payloads, publish only through the selected provider, and compare calendar,
+`garminworkouts.garmin.official_training` implements the official publishing strategy. It maintains a private,
+user-bound registry of the remote workout and schedule IDs created by the application, updates known templates
+idempotently, resolves schedule IDs, previews replacement conflicts, and limits deletion to registry-owned objects.
+The protected Settings page enables the official publisher only after OAuth is connected and `WORKOUT_IMPORT` is
+present. Legacy publishing remains the default and fallback.
+
+## Remaining development-environment validation
+
+1. Verify create, update, schedule, unschedule and delete against the development environment with disposable fixtures.
+2. Implement the durable Starter activity inbox and prompt single-use FIT callback download.
+3. Run a shadow comparison: generate both payloads, publish only through the selected provider, and compare calendar,
    watch display and completed FIT evidence.
-7. Promote official publishing only after create, revise, retire, rate-limit and token-refresh tests pass. Document any
+4. Consider changing the default only after live create, revise, retire, rate-limit and token-refresh tests pass. Document any
    cleanup limitations prominently.
 
 ## Information still needed from Garmin
 
-- Personal API quotas and any unpublished burst limits.
-- Starter user limit and push delivery retention/retry guarantees.
-- Training API schema and supported running-step target types.
-- Whether published plans/workouts can be listed, updated, cancelled and deleted, and which IDs are returned.
-- Whether Starter permits a controlled initial history import or only activities recorded after consent.
+- Whether the development environment returns every documented ID and response body consistently enough for local
+  idempotency tracking.
+- Push retry behavior beyond the documented immediate-acknowledgement requirement.
+- Whether Starter permits any controlled initial history import; the documented contract is push-only.
 - Whether original FIT downloads retain workout execution score and every field used by assessment.
 
-These are access-program questions, not safe implementation guesses. Once the project has Starter credentials and the
-gated documentation, the provider boundary above is ready for the real adapters.
+These are development-environment conformance questions, not safe implementation guesses. Garmin marks the supplied
+program materials confidential; do not commit those files, sanitized fixtures derived from real accounts, or credentials
+to the public repository without Garmin's written approval.

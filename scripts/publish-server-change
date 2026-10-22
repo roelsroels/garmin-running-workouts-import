@@ -137,7 +137,7 @@ if [[ "$has_worktree_changes" == true ]]; then
 
     while IFS= read -r staged_path; do
         case "$staged_path" in
-            .env|.env.web|*.sqlite|*.sqlite3|*.db|*.fit|*.FIT|*.zip|.garmin-*|*/tokens/*|personal_activities/*|personal_plans/*)
+            .env|.env.web|*.sqlite|*.sqlite3|*.db|*.fit|*.FIT|*.zip|.garmin-*|*/tokens/*|personal-api/*|starter-api/*|personal_activities/*|personal_plans/*)
                 die "Refusing to commit private or generated data: $staged_path"
                 ;;
         esac

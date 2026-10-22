@@ -1,3 +1,4 @@
+import json
 import os
 import secrets
 import subprocess
@@ -23,11 +24,12 @@ from garminworkouts.calendar_export import build_calendar, upcoming_runs
 from garminworkouts.garmin.garminclient import GarminAuthenticationError, GarminTokenPersistenceError
 from garminworkouts.garmin.personalclient import GarminPersonalAuthenticationError
 from garminworkouts.garmin.ratelimit import GarminRateLimitError, has_reusable_tokens
+from garminworkouts.garmin.starterclient import GarminStarterAuthenticationError
 from garminworkouts.llm import PROVIDER_DEFAULTS, LLMConfig, create_advisor
 from garminworkouts.models.training_plan import TrainingPlan
 from garminworkouts.replanning import mutable_replacement_workouts
 from garminworkouts.state import AppState, Goal
-from garminworkouts.web_secrets import PendingGarminLogins, SessionAPIKeys
+from garminworkouts.web_secrets import PendingGarminLogins, PendingOAuthAuthorizations, SessionAPIKeys
 from garminworkouts.workflows import GarminAuthenticationRequiredError, PlannerWorkflow
 
 GOAL_TYPES = (
@@ -90,7 +92,8 @@ def create_app(config=None):
         DATA_DIR=os.getenv("GARMIN_WORKOUTS_HOME", "~/.garmin-running-workouts"),
         MAX_CONTENT_LENGTH=1024 * 1024,
         SESSION_COOKIE_HTTPONLY=True,
-        SESSION_COOKIE_SAMESITE="Strict",
+        # OAuth authorization returns through a top-level cross-site GET.
+        SESSION_COOKIE_SAMESITE="Lax",
         SESSION_COOKIE_SECURE=_environment_bool("GARMIN_WEB_COOKIE_SECURE", True),
     )
     if config:
@@ -102,6 +105,7 @@ def create_app(config=None):
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
     llm_keys = SessionAPIKeys()
     pending_garmin_logins = PendingGarminLogins()
+    pending_starter_authorizations = PendingOAuthAuthorizations()
 
     @app.before_request
     def verify_csrf():
@@ -149,6 +153,10 @@ def create_app(config=None):
     @app.errorhandler(GarminPersonalAuthenticationError)
     def personal_authentication_error(error):
         return render_template("error.html", title="Garmin Personal API access denied", message=str(error)), 401
+
+    @app.errorhandler(GarminStarterAuthenticationError)
+    def starter_authentication_error(error):
+        return render_template("error.html", title="Official Garmin API access denied", message=str(error)), 401
 
     @app.errorhandler(GarminRateLimitError)
     def rate_limit_error(error):
@@ -507,11 +515,20 @@ def create_app(config=None):
         with _state(app) as state:
             config = LLMConfig.from_state(state)
             workflow = PlannerWorkflow(state)
+            try:
+                starter_permissions = json.loads(state.get_setting("garmin_starter_permissions", "[]"))
+            except (TypeError, ValueError):
+                starter_permissions = []
             values = {
                 "garmin_username": state.get_setting("garmin_username", ""),
                 "connected": has_reusable_tokens(state.tokens_dir),
                 "activity_provider": workflow.activity_provider_key(),
+                "training_provider": workflow.training_provider_key(),
                 "personal_api_configured": workflow.personal_api_configured(),
+                "starter_api_configured": workflow.starter_api_configured(),
+                "starter_connected": workflow.starter_connected(),
+                "starter_user_id": state.get_setting("garmin_starter_user_id", ""),
+                "starter_permissions": starter_permissions,
                 "llm_provider": config.provider,
                 "llm_base_url": config.base_url,
                 "llm_model": config.model,
@@ -521,6 +538,49 @@ def create_app(config=None):
             }
         return render_template("settings.html", values=values, provider_defaults=PROVIDER_DEFAULTS)
 
+    @app.post("/settings/garmin/starter")
+    def connect_starter():
+        with _state(app) as state:
+            authorization = PlannerWorkflow(state).begin_starter_authorization()
+        previous_state = session.pop("garmin_starter_oauth_state", None)
+        pending_starter_authorizations.remove(previous_state)
+        pending_starter_authorizations.put(authorization.state, authorization.code_verifier)
+        session["garmin_starter_oauth_state"] = authorization.state
+        return redirect(authorization.url)
+
+    @app.get("/settings/garmin/starter/callback")
+    def complete_starter():
+        expected_state = session.pop("garmin_starter_oauth_state", None)
+        returned_state = request.args.get("state", "")
+        if not expected_state or not secrets.compare_digest(expected_state, returned_state):
+            pending_starter_authorizations.remove(expected_state)
+            raise ValueError("The Garmin authorization state was missing or invalid; start the connection again")
+        code_verifier = pending_starter_authorizations.take(returned_state)
+        if not code_verifier:
+            raise ValueError("The Garmin authorization request expired; start the connection again")
+        if request.args.get("error"):
+            raise ValueError("Garmin authorization was declined or could not be completed")
+        with _state(app) as state:
+            status = PlannerWorkflow(state).complete_starter_authorization(
+                request.args.get("code"),
+                code_verifier,
+            )
+        permission_note = (
+            " Workout import permission is active."
+            if "WORKOUT_IMPORT" in status["permissions"]
+            else " Workout import permission is not active for this connection."
+        )
+        flash(f"The official Garmin API connection succeeded.{permission_note}", "success")
+        return redirect(url_for("settings"))
+
+    @app.post("/settings/garmin/starter/disconnect")
+    def disconnect_starter():
+        with _state(app) as state:
+            PlannerWorkflow(state).disconnect_starter()
+        session.pop("garmin_starter_oauth_state", None)
+        flash("The official Garmin API connection was removed.", "success")
+        return redirect(url_for("settings"))
+
     @app.post("/settings/garmin/activity-source")
     def save_activity_source():
         provider = request.form.get("garmin_activity_provider", "legacy")
@@ -528,6 +588,15 @@ def create_app(config=None):
             PlannerWorkflow(state).select_activity_provider(provider, test=True)
         label = "official Personal API" if provider == "personal" else "legacy Connect session"
         flash(f"The {label} is now the tested activity and FIT source.", "success")
+        return redirect(url_for("settings"))
+
+    @app.post("/settings/garmin/training-publisher")
+    def save_training_publisher():
+        provider = request.form.get("garmin_training_provider", "legacy")
+        with _state(app) as state:
+            PlannerWorkflow(state).select_training_provider(provider)
+        label = "official Starter API" if provider == "starter" else "legacy Connect session"
+        flash(f"The {label} is now the workout and calendar publisher.", "success")
         return redirect(url_for("settings"))
 
     @app.post("/settings/garmin")
