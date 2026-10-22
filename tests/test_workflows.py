@@ -702,9 +702,7 @@ def test_workflow_workout_cleanup_reconciles_item_already_missing_remotely(tmp_p
     legacy_context.__enter__.return_value = legacy
     preview = {
         "mode": "preview-only",
-        "workouts": [
-            {"name": "Already gone", "workout_id": 101, "source": "legacy", "action": "delete"}
-        ],
+        "workouts": [{"name": "Already gone", "workout_id": 101, "source": "legacy", "action": "delete"}],
         "summary": {"selectable_workout_templates": 1},
         "warnings": [],
     }

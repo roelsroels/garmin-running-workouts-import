@@ -703,15 +703,11 @@ class PlannerWorkflow:
                         if legacy_connection is None:
                             legacy_connection = stack.enter_context(self.garmin_client())
                             legacy_preview = SelectableWorkoutLibraryCleanup(legacy_connection).preview()
-                            legacy_items = {
-                                str(value["workout_id"]): value for value in legacy_preview["workouts"]
-                            }
+                            legacy_items = {str(value["workout_id"]): value for value in legacy_preview["workouts"]}
                         action = self._delete_legacy_workout_item(legacy_connection, legacy_items, item)
                     recent_actions.append(action)
                     job["actions"].append(action)
-                    job["pending"] = [
-                        value for value in job["pending"] if str(value["workout_id"]) != workout_id
-                    ]
+                    job["pending"] = [value for value in job["pending"] if str(value["workout_id"]) != workout_id]
                     self._remove_cached_workout(workout_id)
                     self._write_private_json(self._workout_library_deletion_path(), job)
         except Exception as exc:
