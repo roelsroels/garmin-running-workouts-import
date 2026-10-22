@@ -538,7 +538,7 @@ def create_app(config=None):
             }
         return render_template("settings.html", values=values, provider_defaults=PROVIDER_DEFAULTS)
 
-    @app.post("/settings/garmin/starter")
+    @app.get("/settings/garmin/starter")
     def connect_starter():
         with _state(app) as state:
             authorization = PlannerWorkflow(state).begin_starter_authorization()

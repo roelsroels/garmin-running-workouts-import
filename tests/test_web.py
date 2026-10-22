@@ -154,10 +154,7 @@ def test_web_starter_oauth_keeps_secret_and_pkce_verifier_server_side(tmp_path, 
     assert b"Official Garmin Connect" in settings.data
     assert b"starter-secret" not in settings.data
 
-    response = client.post(
-        "/settings/garmin/starter",
-        data={"csrf_token": _csrf(client)},
-    )
+    response = client.get("/settings/garmin/starter")
     assert response.status_code == 302
     assert response.headers["Location"] == authorization.url
     with client.session_transaction() as browser_session:
@@ -184,7 +181,7 @@ def test_web_starter_oauth_rejects_callback_state_mismatch(tmp_path, monkeypatch
         lambda _workflow: OAuthAuthorization("https://connect.garmin.com/", "expected", "verifier"),
     )
     client = _app(tmp_path).test_client()
-    client.post("/settings/garmin/starter", data={"csrf_token": _csrf(client)})
+    client.get("/settings/garmin/starter")
 
     response = client.get("/settings/garmin/starter/callback?state=attacker&code=code")
 

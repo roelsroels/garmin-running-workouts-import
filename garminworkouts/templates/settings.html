@@ -28,10 +28,7 @@
         </form>
       {% elif values.starter_api_configured %}
         <p class="help">Client credentials are available from the protected service environment. The browser receives only Garmin's authorization page; the client secret and PKCE verifier remain server-side.</p>
-        <form method="post" action="{{ url_for('connect_starter') }}">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <button class="button primary">Connect with Garmin</button>
-        </form>
+        <a class="button primary" href="{{ url_for('connect_starter') }}">Connect with Garmin</a>
       {% else %}
         <p class="help">Configure <code>GARMIN_STARTER_CLIENT_ID</code>, <code>GARMIN_STARTER_CLIENT_SECRET</code>, and <code>GARMIN_STARTER_REDIRECT_URI</code> in the protected service environment.</p>
       {% endif %}
