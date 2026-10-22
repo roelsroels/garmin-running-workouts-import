@@ -11,7 +11,7 @@ from garminworkouts.garmin.official_training import OfficialObjectRegistry, Offi
 from garminworkouts.garmin.personalclient import PersonalGarminClient
 from garminworkouts.garmin.provider import CURRENT_ACTIVITY_REFRESH_CAPABILITIES, require_connection_capabilities
 from garminworkouts.garmin.ratelimit import GarminRateLimiter, GarminRateLimitError, has_reusable_tokens
-from garminworkouts.garmin.starterclient import StarterGarminClient
+from garminworkouts.garmin.starterclient import GarminStarterNotFoundError, StarterGarminClient
 from garminworkouts.llm import LLMConfig, create_advisor
 from garminworkouts.models.training_plan import TrainingPlan
 from garminworkouts.plan import PlanApplier
@@ -21,6 +21,7 @@ from garminworkouts.retire import (
     PlanRetirement,
     ScheduledConflictCleanup,
     SelectablePlanScheduleCleanup,
+    SelectableWorkoutLibraryCleanup,
     combined_training_plan,
 )
 
@@ -618,6 +619,81 @@ class PlannerWorkflow:
         )
         return actions
 
+    def inspect_workout_library(self):
+        preview = self._current_workout_library_preview()
+        self._write_private_json(self._workout_library_path(), preview)
+        return preview
+
+    def load_workout_library(self):
+        return self._read_json(self._workout_library_path())
+
+    def delete_selected_workouts(self, expected, selected_workout_ids):
+        current = self._current_workout_library_preview()
+        if current != expected:
+            raise ValueError("The Garmin workout library changed after inspection. Inspect it again before applying.")
+        selected = {str(value) for value in selected_workout_ids if str(value).strip()}
+        if not selected:
+            raise ValueError("Select at least one Garmin workout template to delete")
+        items_by_id = {str(item["workout_id"]): item for item in current["workouts"]}
+        if selected - set(items_by_id):
+            raise ValueError("The selected Garmin workout templates were not part of the inspected library")
+
+        official_ids = {workout_id for workout_id in selected if items_by_id[workout_id]["source"] == "official"}
+        legacy_ids = selected - official_ids
+        actions = []
+        if official_ids and (not self.starter_connected() or "WORKOUT_IMPORT" not in self._starter_permissions()):
+            raise GarminAuthenticationRequiredError(
+                "Reconnect the official Garmin Starter API before deleting its workout templates"
+            )
+        if legacy_ids:
+            with self.garmin_client() as connection:
+                actions.extend(SelectableWorkoutLibraryCleanup(connection).apply(current, legacy_ids))
+        if official_ids:
+            registry = self._official_registry()
+            with self.starter_client() as connection:
+                for workout_id in official_ids:
+                    item = items_by_id[workout_id]
+                    try:
+                        connection.delete_workout(item["workout_id"])
+                    except GarminStarterNotFoundError:
+                        pass
+                    registry.forget_workout(workout_id=item["workout_id"])
+                    actions.append(
+                        {
+                            "action": "deleted-selected-workout-template",
+                            "name": item["name"],
+                            "workout_id": item["workout_id"],
+                            "source": "official",
+                        }
+                    )
+        self.state.record_event("selected-workout-templates-deleted-from-web", {"actions": actions})
+        return actions
+
+    def _current_workout_library_preview(self):
+        with self.garmin_client() as connection:
+            preview = SelectableWorkoutLibraryCleanup(connection).preview()
+        items_by_id = {str(item["workout_id"]): item for item in preview["workouts"]}
+        user_id = str(self.state.get_setting("garmin_starter_user_id", "")).strip()
+        if user_id:
+            registry = self._official_registry()
+            for recorded in registry.workouts():
+                workout_id = str(recorded["workout_id"])
+                item = items_by_id.setdefault(
+                    workout_id,
+                    {
+                        "name": recorded["name"],
+                        "workout_id": recorded["workout_id"],
+                        "action": "delete",
+                    },
+                )
+                item["source"] = "official"
+        preview["workouts"] = sorted(
+            items_by_id.values(),
+            key=lambda item: (item["name"].casefold(), str(item["workout_id"])),
+        )
+        preview["summary"]["selectable_workout_templates"] = len(preview["workouts"])
+        return preview
+
     def inspect_previous_block_templates(self):
         record, previous = self._finished_previous_block()
         active_plan = combined_training_plan(self.state.block_lineage(record.id), name=record.name)
@@ -856,6 +932,9 @@ class PlannerWorkflow:
 
     def _selectable_schedules_path(self, plan_id):
         return self._web_state_dir / f"cleanup-{int(plan_id)}-selectable-schedules.json"
+
+    def _workout_library_path(self):
+        return self._web_state_dir / "cleanup-workout-library.json"
 
     def _obsolete_cleanup_path(self, plan_id):
         return self._web_state_dir / f"cleanup-{int(plan_id)}-obsolete-templates.json"

@@ -250,6 +250,7 @@ label small { color: var(--muted); font-weight: 400; line-height: 1.4; }
 .selectable-schedule small { color: var(--muted); font-weight: 400; }
 .selectable-schedule.is-past { background: var(--finished-bg); }
 .selectable-schedule.is-past time { color: var(--muted); }
+.selectable-workout .workout-id { color: var(--muted); font-size: .75rem; font-variant-numeric: tabular-nums; }
 .warning-text { color: var(--amber); margin: 1rem 0 0; }
 .status-pill { display: inline-flex; align-items: center; width: fit-content; min-height: 28px; padding: .25rem .7rem; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); font-size: .75rem; text-transform: uppercase; letter-spacing: .08em; }
 .status-pill.safe, .status-pill.completed { color: var(--mint); border-color: var(--border-good); }
@@ -341,6 +342,7 @@ body.is-waiting { overflow: hidden; }
   .schedule-row { grid-template-columns: 1fr; gap: .35rem; }
   .selectable-schedule { grid-template-columns: auto 1fr; }
   .selectable-schedule time, .selectable-schedule .status-pill { grid-column: 2; }
+  .selectable-workout > span:nth-of-type(2) { grid-column: 2; }
   .schedule-row.is-next-action::before { width: fit-content; }
   .step-row { grid-template-columns: 2rem 1fr; }
   .step-row label { grid-column: 2; }

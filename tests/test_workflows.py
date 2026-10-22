@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from garminworkouts.activities import ActivitySummary
+from garminworkouts.garmin.official_training import OfficialObjectRegistry
 from garminworkouts.state import AppState, Goal
 from garminworkouts.workflows import PlannerWorkflow
 
@@ -608,3 +609,43 @@ def test_workflow_calendar_changes_suppresses_nearest_five_rounding_no_op():
     }
 
     assert PlannerWorkflow.calendar_changes(old, new, today=date(2030, 1, 5)) == []
+
+
+def test_workflow_bulk_workout_cleanup_splits_legacy_and_official_deletion(tmp_path, monkeypatch):
+    legacy = MagicMock()
+    legacy.list_workouts.return_value = [
+        {
+            "workoutId": 101,
+            "workoutName": "Legacy missed run",
+            "sportType": {"sportTypeId": 1, "sportTypeKey": "running"},
+        },
+        {
+            "workoutId": 202,
+            "workoutName": "Official run",
+            "sportType": {"sportTypeId": 1, "sportTypeKey": "running"},
+        },
+    ]
+    legacy_context = MagicMock()
+    legacy_context.__enter__.return_value = legacy
+    official = MagicMock()
+    official_context = MagicMock()
+    official_context.__enter__.return_value = official
+
+    with AppState(tmp_path / "state") as state:
+        state.set_setting("garmin_starter_user_id", "runner")
+        state.set_setting("garmin_starter_permissions", '["WORKOUT_IMPORT"]')
+        registry = OfficialObjectRegistry(state.data_dir / "starter-api", "runner")
+        registry.record_workout("Official run", 202, "hash")
+        workflow = PlannerWorkflow(state)
+        monkeypatch.setattr(workflow, "garmin_client", MagicMock(return_value=legacy_context))
+        monkeypatch.setattr(workflow, "starter_client", MagicMock(return_value=official_context))
+        monkeypatch.setattr(workflow, "starter_connected", lambda: True)
+
+        preview = workflow.inspect_workout_library()
+        actions = workflow.delete_selected_workouts(preview, [101, 202])
+
+        assert {item["source"] for item in preview["workouts"]} == {"legacy", "official"}
+        legacy.delete_workout.assert_called_once_with(101)
+        official.delete_workout.assert_called_once_with(202)
+        assert OfficialObjectRegistry(state.data_dir / "starter-api", "runner").workout("Official run") is None
+        assert {item["source"] for item in actions} == {"legacy", "official"}

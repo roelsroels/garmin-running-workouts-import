@@ -215,6 +215,55 @@ class SelectablePlanScheduleCleanup:
         return items
 
 
+class SelectableWorkoutLibraryCleanup:
+    """List and selectively delete running workout templates from Garmin Connect."""
+
+    def __init__(self, connection):
+        self.connection = connection
+
+    def preview(self):
+        require_connection_capabilities(
+            self.connection,
+            "inspect the running workout library",
+            GarminCapability.WORKOUT_LIBRARY_READ,
+        )
+        workouts = {}
+        for workout in self.connection.list_workouts():
+            if not RunningWorkout.is_running(workout):
+                continue
+            workout_id = RunningWorkout.extract_workout_id(workout)
+            workouts[str(workout_id)] = {
+                "name": RunningWorkout.extract_workout_name(workout),
+                "workout_id": workout_id,
+                "source": "legacy",
+                "action": "delete",
+            }
+        items = sorted(workouts.values(), key=lambda item: (item["name"].casefold(), str(item["workout_id"])))
+        return _selectable_workout_preview(items)
+
+    def apply(self, preview, selected_workout_ids):
+        selected = _validated_selected_workout_ids(preview, selected_workout_ids)
+        require_connection_capabilities(
+            self.connection,
+            "delete selected running workouts",
+            GarminCapability.WORKOUT_DELETE,
+        )
+        actions = []
+        for item in preview["workouts"]:
+            if item.get("source") == "official" or str(item.get("workout_id")) not in selected:
+                continue
+            self.connection.delete_workout(item["workout_id"])
+            actions.append(
+                {
+                    "action": "deleted-selected-workout-template",
+                    "name": item["name"],
+                    "workout_id": item["workout_id"],
+                    "source": "legacy",
+                }
+            )
+        return actions
+
+
 class PlanRetirement:
     def __init__(
         self,
@@ -520,4 +569,30 @@ def _validated_selected_schedule_ids(preview, selected_schedule_ids):
     unknown = selected - allowed
     if unknown:
         raise ValueError("The selected Garmin calendar entries were not part of the inspected schedule")
+    return selected
+
+
+def _selectable_workout_preview(workouts):
+    return {
+        "mode": "preview-only; no Garmin Connect changes were made",
+        "workouts": workouts,
+        "summary": {"selectable_workout_templates": len(workouts)},
+        "warnings": [
+            "These are workout-library templates, not completed activities.",
+            "Deleting a template never deletes an activity/FIT record.",
+        ],
+    }
+
+
+def _validated_selected_workout_ids(preview, selected_workout_ids):
+    selected = {str(value) for value in selected_workout_ids if str(value).strip()}
+    if not selected:
+        raise ValueError("Select at least one Garmin workout template to delete")
+    allowed = {
+        str(item["workout_id"])
+        for item in preview.get("workouts", [])
+        if item.get("action") == "delete" and item.get("workout_id") is not None
+    }
+    if selected - allowed:
+        raise ValueError("The selected Garmin workout templates were not part of the inspected library")
     return selected

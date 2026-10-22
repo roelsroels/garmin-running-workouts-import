@@ -827,6 +827,59 @@ def test_cleanup_selects_individual_or_all_active_plan_schedules(tmp_path, monke
     assert removed == [(record.id, preview, ["101", "102"])]
 
 
+def test_cleanup_bulk_deletes_selected_workout_library_templates_without_active_plan(tmp_path, monkeypatch):
+    preview = {
+        "mode": "preview-only",
+        "workouts": [
+            {
+                "name": "Legacy missed run",
+                "workout_id": 101,
+                "source": "legacy",
+                "action": "delete",
+            },
+            {
+                "name": "Official run",
+                "workout_id": 202,
+                "source": "official",
+                "action": "delete",
+            },
+        ],
+        "summary": {"selectable_workout_templates": 2},
+        "warnings": [],
+    }
+    monkeypatch.setattr(PlannerWorkflow, "load_workout_library", lambda _workflow: preview)
+    deleted = []
+    monkeypatch.setattr(
+        PlannerWorkflow,
+        "delete_selected_workouts",
+        lambda _workflow, expected, selected: (
+            deleted.append((expected, selected))
+            or [
+                {"action": "deleted-selected-workout-template"},
+                {"action": "deleted-selected-workout-template"},
+            ]
+        ),
+    )
+    client = _app(tmp_path).test_client()
+
+    page = client.get("/cleanup?library_inspected=1")
+    assert page.status_code == 200
+    assert b"Select all 2 running workout templates" in page.data
+    assert b"Legacy missed run" in page.data
+    assert b"Official run" in page.data
+    assert b'name="workout_ids" value="101"' in page.data
+    assert b'id="delete-selected-workouts" disabled' in page.data
+
+    response = client.post(
+        "/cleanup/library/apply",
+        data={"csrf_token": _csrf(client), "workout_ids": ["101", "202"]},
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert b"Deleted 2 selected workout templates." in response.data
+    assert deleted == [(preview, ["101", "202"])]
+
+
 def test_finished_dashboard_offers_next_training_block(tmp_path, monkeypatch):
     app = _app(tmp_path)
     finished_date = date.today() - timedelta(days=1)

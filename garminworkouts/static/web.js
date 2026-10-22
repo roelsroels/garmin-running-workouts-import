@@ -80,6 +80,20 @@ function refreshScheduleSelection() {
   if (submit) submit.disabled = selected === 0;
 }
 
+function refreshWorkoutSelection() {
+  const form = document.querySelector("#selectable-workouts-form");
+  if (!form) return;
+  const entries = Array.from(form.querySelectorAll('input[name="workout_ids"]:not(:disabled)'));
+  const selectAll = form.querySelector("#select-all-workouts");
+  const submit = form.querySelector("#delete-selected-workouts");
+  const selected = entries.filter((input) => input.checked).length;
+  if (selectAll) {
+    selectAll.checked = entries.length > 0 && selected === entries.length;
+    selectAll.indeterminate = selected > 0 && selected < entries.length;
+  }
+  if (submit) submit.disabled = selected === 0;
+}
+
 document.addEventListener("click", (event) => {
   if (event.target.closest("#add-step")) {
     const list = document.querySelector("#steps");
@@ -109,6 +123,13 @@ document.addEventListener("change", (event) => {
     refreshScheduleSelection();
   }
   if (event.target.matches('#selectable-schedules-form input[name="schedule_ids"]')) refreshScheduleSelection();
+  if (event.target.matches("#select-all-workouts")) {
+    document.querySelectorAll('#selectable-workouts-form input[name="workout_ids"]:not(:disabled)').forEach((input) => {
+      input.checked = event.target.checked;
+    });
+    refreshWorkoutSelection();
+  }
+  if (event.target.matches('#selectable-workouts-form input[name="workout_ids"]')) refreshWorkoutSelection();
 });
 
 document.addEventListener("submit", (event) => {
@@ -125,3 +146,4 @@ refreshStepNumbers();
 refreshGoalFields();
 refreshLLMFields();
 refreshScheduleSelection();
+refreshWorkoutSelection();

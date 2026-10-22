@@ -7,6 +7,7 @@ from garminworkouts.retire import (
     PlanRetirement,
     ScheduledConflictCleanup,
     SelectablePlanScheduleCleanup,
+    SelectableWorkoutLibraryCleanup,
     combined_training_plan,
 )
 
@@ -430,3 +431,39 @@ def test_selectable_schedule_cleanup_rejects_uninspected_or_empty_selection():
     with pytest.raises(ValueError, match="not part of the inspected schedule"):
         cleanup.apply(preview, [999])
     assert connection.unscheduled == []
+
+
+def test_selectable_workout_library_cleanup_lists_running_templates_and_deletes_only_checked():
+    connection = FakeConnection(
+        workouts=[
+            _workout(101, "Old missed run"),
+            _workout(102, "Keep this run"),
+            _cycling_workout(103, "Bike intervals"),
+        ]
+    )
+    cleanup = SelectableWorkoutLibraryCleanup(connection)
+
+    preview = cleanup.preview()
+    actions = cleanup.apply(preview, [101])
+
+    assert preview["summary"]["selectable_workout_templates"] == 2
+    assert [item["name"] for item in preview["workouts"]] == ["Keep this run", "Old missed run"]
+    assert connection.deleted == [101]
+    assert actions == [
+        {
+            "action": "deleted-selected-workout-template",
+            "name": "Old missed run",
+            "workout_id": 101,
+            "source": "legacy",
+        }
+    ]
+
+
+def test_selectable_workout_library_cleanup_rejects_forged_selection():
+    connection = FakeConnection(workouts=[_workout(101, "Old missed run")])
+    cleanup = SelectableWorkoutLibraryCleanup(connection)
+    preview = cleanup.preview()
+
+    with pytest.raises(ValueError, match="not part of the inspected library"):
+        cleanup.apply(preview, [999])
+    assert connection.deleted == []

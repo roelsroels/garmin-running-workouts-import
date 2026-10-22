@@ -412,12 +412,15 @@ def create_app(config=None):
             preview = None
             obsolete_preview = None
             schedule_preview = None
+            library_preview = None
             if record and request.args.get("inspected") == "1":
                 preview = workflow.load_active_conflicts(record.id)
             if record and request.args.get("obsolete_inspected") == "1":
                 obsolete_preview = workflow.load_previous_block_templates(record.id)
             if record and request.args.get("schedules_inspected") == "1":
                 schedule_preview = workflow.load_selectable_schedules(record.id)
+            if request.args.get("library_inspected") == "1":
+                library_preview = workflow.load_workout_library()
             previous_plan = workflow.finished_previous_block() if record else None
         return render_template(
             "cleanup.html",
@@ -426,7 +429,24 @@ def create_app(config=None):
             previous_plan=previous_plan,
             obsolete_preview=obsolete_preview,
             schedule_preview=schedule_preview,
+            library_preview=library_preview,
         )
+
+    @app.post("/cleanup/library/inspect")
+    def inspect_workout_library():
+        with _state(app) as state:
+            PlannerWorkflow(state).inspect_workout_library()
+        return redirect(url_for("cleanup", library_inspected=1))
+
+    @app.post("/cleanup/library/apply")
+    def delete_selected_workouts():
+        selected_workout_ids = request.form.getlist("workout_ids")
+        with _state(app) as state:
+            workflow = PlannerWorkflow(state)
+            preview = workflow.load_workout_library()
+            actions = workflow.delete_selected_workouts(preview, selected_workout_ids)
+        flash(f"Deleted {len(actions)} selected workout template{'s' if len(actions) != 1 else ''}.", "success")
+        return redirect(url_for("cleanup"))
 
     @app.post("/cleanup/schedules/inspect")
     def inspect_selectable_schedules():

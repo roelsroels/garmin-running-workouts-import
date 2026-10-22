@@ -31,6 +31,9 @@ class OfficialObjectRegistry:
     def workout(self, name):
         return self.data["workouts"].get(str(name))
 
+    def workouts(self):
+        return list(self.data["workouts"].values())
+
     def schedules(self):
         return list(self.data["schedules"].values())
 

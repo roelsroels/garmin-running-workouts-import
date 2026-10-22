@@ -164,6 +164,12 @@ and a **Select all** option. Approval unschedules only the checked entries. Futu
 local calendar so they no longer count as remaining; completed activity/FIT records and workout-library templates are
 not deleted.
 
+The Garmin calendar and Garmin workout library are separate. To remove the workout rows visible under **Training &
+Planning → Workouts**, use **Garmin cleanup → Load running workout library**. The resulting list supports individual
+selection and **Select all**. Older templates are removed through the reusable Garmin Connect session; templates
+created through this application's official Training API connection are deleted through that API. This deletes workout
+definitions only—not completed activities or their FIT evidence.
+
 During goal setup, optional heart-rate guidance can be configured separately for warm-up/cooldown, easy running, long runs, quality work, and interval recovery. Choose upper BPM caps, BPM ranges, or Garmin zones. These are user-supplied watch alerts—not calculated or clinically validated zones. Garmin supports only one intensity target per step, so when quality work has both goal pace and HR guidance, the wizard asks which target should be primary.
 
 The main menu also includes **Create a one-off heart-rate workout**. It builds sequential time-based steps interactively, enabling workouts such as 10 minutes at a 120 bpm maximum followed by 15 minutes at a 140 bpm maximum without editing YAML.
@@ -220,6 +226,8 @@ The web dashboard provides:
 - protected cleanup of duplicates already present in Garmin;
 - selectable active-block calendar cleanup, including past or missed schedules, with individual checkboxes and a
   **Select all** control that never deletes completed activities or workout templates;
+- selectable running workout-library cleanup for both older Garmin Connect templates and templates created through the
+  official Training API, again with individual checkboxes and **Select all**;
 - preview-first one-time cleanup of obsolete templates left by the immediately preceding finished block;
 - a dynamic one-off heart-rate workout builder;
 - Garmin reconnection without storing the password; and

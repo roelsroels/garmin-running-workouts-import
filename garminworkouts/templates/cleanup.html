@@ -1,7 +1,36 @@
 {% extends "base.html" %}
 {% block title %}Garmin cleanup · Running Planner{% endblock %}
 {% block content %}
-  <div class="page-heading"><div><p class="eyebrow">Protected cleanup</p><h1>Clean Garmin Connect</h1><p>The active local plan is always protected. Inspect the exact candidates before approving any removal.</p></div></div>
+  <div class="page-heading"><div><p class="eyebrow">Controlled cleanup</p><h1>Clean Garmin Connect</h1><p>Inspect the exact calendar entries or workout templates before approving any removal. Completed activities and FIT records stay separate and are never deleted here.</p></div></div>
+  <section class="card schedule-cleanup">
+    <p class="eyebrow">Running workout library</p>
+    <h2>Delete selected workout templates</h2>
+    <p class="muted">This is the list shown under Garmin Connect → Training &amp; Planning → Workouts. Select old or missed-date templates individually, or use Select all. Deleting these rows does not delete completed running activities.</p>
+    {% if library_preview is none %}
+      <form method="post" action="{{ url_for('inspect_workout_library') }}" data-loading-message="Loading the workout library…" data-loading-detail="Reading running workout templates without making changes."><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button primary">Load running workout library</button></form>
+    {% else %}
+      {% set workout_count = library_preview.summary.selectable_workout_templates %}
+      {% if workout_count %}
+        <form class="form-stack" id="selectable-workouts-form" method="post" action="{{ url_for('delete_selected_workouts') }}" data-loading-message="Deleting selected workout templates…" data-loading-detail="Only the checked workout-library rows are being deleted. Completed activities remain untouched.">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <label class="consent select-all-control"><input type="checkbox" id="select-all-workouts"><span><strong>Select all {{ workout_count }} running workout templates</strong><small>You can clear individual entries below before deleting.</small></span></label>
+          <div class="selectable-schedule-list">
+            {% for item in library_preview.workouts %}
+              <label class="selectable-schedule selectable-workout">
+                <input type="checkbox" name="workout_ids" value="{{ item.workout_id }}">
+                <span class="workout-id">#{{ item.workout_id }}</span>
+                <span><strong>{{ item.name }}</strong><small>{{ 'Created through the official Training API' if item.source == 'official' else 'Garmin Connect workout library' }}</small></span>
+                <span class="status-pill {{ 'safe' if item.source == 'official' else '' }}">{{ 'Official' if item.source == 'official' else 'Legacy' }}</span>
+              </label>
+            {% endfor %}
+          </div>
+          <button class="button danger" id="delete-selected-workouts" disabled>Delete selected workout templates</button>
+        </form>
+      {% else %}
+        <p class="muted">No running workout templates were found in Garmin Connect.</p>
+      {% endif %}
+    {% endif %}
+  </section>
   {% if not plan %}
     <section class="card"><h2>No active plan</h2><p class="muted">Apply a plan before using protected cleanup.</p></section>
   {% else %}

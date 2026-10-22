@@ -34,6 +34,7 @@ def test_registry_is_private_atomic_and_bound_to_connected_user(tmp_path):
 
     assert registry.path.stat().st_mode & 0o777 == 0o600
     assert registry.workout("Easy")["workout_id"] == 42
+    assert registry.workouts()[0]["name"] == "Easy"
     assert registry.schedule("2030-01-06", "Easy")["schedule_id"] == 84
     assert not registry.path.with_suffix(".tmp").exists()
     with pytest.raises(ValueError, match="another connected user"):
