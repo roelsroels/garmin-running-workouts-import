@@ -1,6 +1,7 @@
 import json
 import os
 import secrets
+from contextlib import ExitStack
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -28,6 +29,9 @@ from garminworkouts.retire import (
 
 class GarminAuthenticationRequiredError(ValueError):
     pass
+
+
+WORKOUT_LIBRARY_DELETE_BATCH_SIZE = 1
 
 
 class PlannerWorkflow:
@@ -628,46 +632,152 @@ class PlannerWorkflow:
         return self._read_json(self._workout_library_path())
 
     def delete_selected_workouts(self, expected, selected_workout_ids):
-        current = self._current_workout_library_preview()
-        if current != expected:
-            raise ValueError("The Garmin workout library changed after inspection. Inspect it again before applying.")
+        result = self.start_workout_library_deletion(expected, selected_workout_ids)
+        while result["status"] == "running":
+            result = self.continue_workout_library_deletion(batch_size=len(result["pending"]) or 1)
+        if result["status"] == "paused":
+            raise RuntimeError(result["last_error"])
+        return result["actions"]
+
+    def start_workout_library_deletion(self, expected, selected_workout_ids):
+        if self.load_workout_library_deletion():
+            raise ValueError("A workout-library deletion is already in progress; continue or retry it first")
         selected = {str(value) for value in selected_workout_ids if str(value).strip()}
         if not selected:
             raise ValueError("Select at least one Garmin workout template to delete")
-        items_by_id = {str(item["workout_id"]): item for item in current["workouts"]}
+        items_by_id = {str(item["workout_id"]): item for item in expected.get("workouts", [])}
         if selected - set(items_by_id):
             raise ValueError("The selected Garmin workout templates were not part of the inspected library")
-
-        official_ids = {workout_id for workout_id in selected if items_by_id[workout_id]["source"] == "official"}
-        legacy_ids = selected - official_ids
-        actions = []
-        if official_ids and (not self.starter_connected() or "WORKOUT_IMPORT" not in self._starter_permissions()):
+        pending = [dict(item) for item in expected["workouts"] if str(item["workout_id"]) in selected]
+        if any(item.get("source") == "official" for item in pending) and (
+            not self.starter_connected() or "WORKOUT_IMPORT" not in self._starter_permissions()
+        ):
             raise GarminAuthenticationRequiredError(
                 "Reconnect the official Garmin Starter API before deleting its workout templates"
             )
-        if legacy_ids:
-            with self.garmin_client() as connection:
-                actions.extend(SelectableWorkoutLibraryCleanup(connection).apply(current, legacy_ids))
-        if official_ids:
-            registry = self._official_registry()
-            with self.starter_client() as connection:
-                for workout_id in official_ids:
-                    item = items_by_id[workout_id]
-                    try:
-                        connection.delete_workout(item["workout_id"])
-                    except GarminStarterNotFoundError:
-                        pass
-                    registry.forget_workout(workout_id=item["workout_id"])
-                    actions.append(
-                        {
-                            "action": "deleted-selected-workout-template",
-                            "name": item["name"],
-                            "workout_id": item["workout_id"],
-                            "source": "official",
-                        }
-                    )
-        self.state.record_event("selected-workout-templates-deleted-from-web", {"actions": actions})
-        return actions
+        job = {
+            "version": 1,
+            "status": "running",
+            "total": len(pending),
+            "pending": pending,
+            "actions": [],
+            "last_error": None,
+        }
+        self._write_private_json(self._workout_library_deletion_path(), job)
+        return self.continue_workout_library_deletion()
+
+    def load_workout_library_deletion(self):
+        path = self._workout_library_deletion_path()
+        if not path.exists():
+            return None
+        return self._read_json(path)
+
+    def continue_workout_library_deletion(self, batch_size=WORKOUT_LIBRARY_DELETE_BATCH_SIZE):
+        job = self.load_workout_library_deletion()
+        if not job:
+            raise ValueError("There is no workout-library deletion to continue")
+        try:
+            batch_size = max(1, min(10, int(batch_size)))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("The workout deletion batch size is invalid") from exc
+        job["status"] = "running"
+        job["last_error"] = None
+        batch = list(job["pending"][:batch_size])
+        recent_actions = []
+
+        try:
+            with ExitStack() as stack:
+                legacy_connection = None
+                legacy_items = None
+                official_connection = None
+                registry = None
+                for item in batch:
+                    source = item.get("source", "legacy")
+                    workout_id = str(item["workout_id"])
+                    if source == "official":
+                        if official_connection is None:
+                            official_connection = stack.enter_context(self.starter_client())
+                            registry = self._official_registry()
+                        action = self._delete_official_workout_item(official_connection, registry, item)
+                    else:
+                        if legacy_connection is None:
+                            legacy_connection = stack.enter_context(self.garmin_client())
+                            legacy_preview = SelectableWorkoutLibraryCleanup(legacy_connection).preview()
+                            legacy_items = {
+                                str(value["workout_id"]): value for value in legacy_preview["workouts"]
+                            }
+                        action = self._delete_legacy_workout_item(legacy_connection, legacy_items, item)
+                    recent_actions.append(action)
+                    job["actions"].append(action)
+                    job["pending"] = [
+                        value for value in job["pending"] if str(value["workout_id"]) != workout_id
+                    ]
+                    self._remove_cached_workout(workout_id)
+                    self._write_private_json(self._workout_library_deletion_path(), job)
+        except Exception as exc:
+            job["status"] = "paused"
+            job["last_error"] = (
+                "Garmin stopped responding while deleting workout templates. "
+                "The completed items were saved; retry to continue with the remaining items. "
+                f"Details: {str(exc)[:240]}"
+            )
+            self._write_private_json(self._workout_library_deletion_path(), job)
+            self.state.record_event(
+                "workout-library-deletion-paused",
+                {"actions": recent_actions, "remaining": len(job["pending"]), "error_type": type(exc).__name__},
+            )
+            return job
+
+        if job["pending"]:
+            self._write_private_json(self._workout_library_deletion_path(), job)
+            return job
+
+        job["status"] = "completed"
+        path = self._workout_library_deletion_path()
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+        self.state.record_event("selected-workout-templates-deleted-from-web", {"actions": job["actions"]})
+        return job
+
+    @staticmethod
+    def _delete_legacy_workout_item(connection, current_items, item):
+        workout_id = str(item["workout_id"])
+        remote = current_items.get(workout_id)
+        if remote is None:
+            action = "reconciled-missing-workout-template"
+        else:
+            if remote["name"] != item["name"]:
+                raise RuntimeError(
+                    f"Garmin workout #{workout_id} changed names after inspection; deletion stopped safely"
+                )
+            connection.delete_workout(item["workout_id"])
+            current_items.pop(workout_id, None)
+            action = "deleted-selected-workout-template"
+        return {"action": action, "name": item["name"], "workout_id": item["workout_id"], "source": "legacy"}
+
+    @staticmethod
+    def _delete_official_workout_item(connection, registry, item):
+        try:
+            connection.get_workout(item["workout_id"])
+            connection.delete_workout(item["workout_id"])
+            action = "deleted-selected-workout-template"
+        except GarminStarterNotFoundError:
+            action = "reconciled-missing-workout-template"
+        registry.forget_workout(workout_id=item["workout_id"])
+        return {"action": action, "name": item["name"], "workout_id": item["workout_id"], "source": "official"}
+
+    def _remove_cached_workout(self, workout_id):
+        try:
+            preview = self.load_workout_library()
+        except FileNotFoundError:
+            return
+        preview["workouts"] = [
+            item for item in preview.get("workouts", []) if str(item.get("workout_id")) != str(workout_id)
+        ]
+        preview.setdefault("summary", {})["selectable_workout_templates"] = len(preview["workouts"])
+        self._write_private_json(self._workout_library_path(), preview)
 
     def _current_workout_library_preview(self):
         with self.garmin_client() as connection:
@@ -935,6 +1045,9 @@ class PlannerWorkflow:
 
     def _workout_library_path(self):
         return self._web_state_dir / "cleanup-workout-library.json"
+
+    def _workout_library_deletion_path(self):
+        return self._web_state_dir / "cleanup-workout-library-deletion.json"
 
     def _obsolete_cleanup_path(self, plan_id):
         return self._web_state_dir / f"cleanup-{int(plan_id)}-obsolete-templates.json"

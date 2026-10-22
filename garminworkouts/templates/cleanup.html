@@ -5,8 +5,23 @@
   <section class="card schedule-cleanup">
     <p class="eyebrow">Running workout library</p>
     <h2>Delete selected workout templates</h2>
-    <p class="muted">This is the list shown under Garmin Connect → Training &amp; Planning → Workouts. Select old or missed-date templates individually, or use Select all. Deleting these rows does not delete completed running activities.</p>
-    {% if library_preview is none %}
+    <p class="muted">This is the list shown under Garmin Connect → Training &amp; Planning → Workouts. Select old or missed-date templates individually, or use Select all. Deleting these rows does not delete completed running activities or erase completed/missed plan history from the local calendar.</p>
+    {% if library_deletion %}
+      {% set completed_count = library_deletion.actions|length %}
+      {% set remaining_count = library_deletion.pending|length %}
+      <div class="approval-box vertical">
+        <div>
+          <p class="eyebrow">Resumable deletion</p>
+          <h3>{{ completed_count }} of {{ library_deletion.total }} reconciled</h3>
+          <p class="muted">{{ remaining_count }} template{{ '' if remaining_count == 1 else 's' }} remaining. Progress is saved after every remote deletion, so refreshing or retrying cannot repeat completed work.</p>
+          {% if library_deletion.last_error %}<p class="warning-text">{{ library_deletion.last_error }}</p>{% endif %}
+        </div>
+        <form method="post" action="{{ url_for('continue_workout_library_deletion') }}" data-loading-message="Continuing workout cleanup…" data-loading-detail="Deleting a small batch and saving progress after every item."{% if library_deletion.status == 'running' %} data-auto-submit="true"{% endif %}>
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button class="button {{ 'primary' if library_deletion.status == 'running' else 'danger' }}">{{ 'Continuing automatically…' if library_deletion.status == 'running' else 'Retry remaining templates' }}</button>
+        </form>
+      </div>
+    {% elif library_preview is none %}
       <form method="post" action="{{ url_for('inspect_workout_library') }}" data-loading-message="Loading the workout library…" data-loading-detail="Reading running workout templates without making changes."><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button primary">Load running workout library</button></form>
     {% else %}
       {% set workout_count = library_preview.summary.selectable_workout_templates %}

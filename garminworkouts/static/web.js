@@ -142,6 +142,13 @@ document.addEventListener("submit", (event) => {
 
 window.addEventListener("pageshow", hideWaitState);
 
+const resumableDeletionForm = document.querySelector('form[data-auto-submit="true"]');
+if (resumableDeletionForm) {
+  window.setTimeout(() => {
+    if (document.documentElement.contains(resumableDeletionForm)) resumableDeletionForm.requestSubmit();
+  }, 450);
+}
+
 refreshStepNumbers();
 refreshGoalFields();
 refreshLLMFields();

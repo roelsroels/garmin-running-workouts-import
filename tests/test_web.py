@@ -851,13 +851,17 @@ def test_cleanup_bulk_deletes_selected_workout_library_templates_without_active_
     deleted = []
     monkeypatch.setattr(
         PlannerWorkflow,
-        "delete_selected_workouts",
+        "start_workout_library_deletion",
         lambda _workflow, expected, selected: (
             deleted.append((expected, selected))
-            or [
-                {"action": "deleted-selected-workout-template"},
-                {"action": "deleted-selected-workout-template"},
-            ]
+            or {
+                "status": "completed",
+                "pending": [],
+                "actions": [
+                    {"action": "deleted-selected-workout-template"},
+                    {"action": "deleted-selected-workout-template"},
+                ],
+            }
         ),
     )
     client = _app(tmp_path).test_client()
@@ -876,8 +880,44 @@ def test_cleanup_bulk_deletes_selected_workout_library_templates_without_active_
         follow_redirects=True,
     )
     assert response.status_code == 200
-    assert b"Deleted 2 selected workout templates." in response.data
+    assert b"Workout-library cleanup completed: 2 templates deleted or reconciled." in response.data
     assert deleted == [(preview, ["101", "202"])]
+
+
+def test_cleanup_continues_resumable_workout_deletion_without_a_500(tmp_path, monkeypatch):
+    job = {
+        "version": 1,
+        "status": "paused",
+        "total": 4,
+        "pending": [{"workout_id": 4, "name": "Remaining"}],
+        "actions": [{"workout_id": value} for value in (1, 2, 3)],
+        "last_error": "Garmin stopped responding; retry safely.",
+    }
+    monkeypatch.setattr(PlannerWorkflow, "load_workout_library_deletion", lambda _workflow: job)
+    monkeypatch.setattr(
+        PlannerWorkflow,
+        "continue_workout_library_deletion",
+        lambda _workflow: {
+            **job,
+            "status": "completed",
+            "pending": [],
+            "actions": [*job["actions"], {"workout_id": 4}],
+        },
+    )
+    client = _app(tmp_path).test_client()
+
+    page = client.get("/cleanup?library_inspected=1")
+    assert page.status_code == 200
+    assert b"3 of 4 reconciled" in page.data
+    assert b"Retry remaining templates" in page.data
+
+    response = client.post(
+        "/cleanup/library/continue",
+        data={"csrf_token": _csrf(client)},
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert b"Workout-library cleanup completed: 4 templates deleted or reconciled." in response.data
 
 
 def test_finished_dashboard_offers_next_training_block(tmp_path, monkeypatch):

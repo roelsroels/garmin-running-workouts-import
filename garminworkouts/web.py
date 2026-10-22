@@ -413,13 +413,14 @@ def create_app(config=None):
             obsolete_preview = None
             schedule_preview = None
             library_preview = None
+            library_deletion = workflow.load_workout_library_deletion()
             if record and request.args.get("inspected") == "1":
                 preview = workflow.load_active_conflicts(record.id)
             if record and request.args.get("obsolete_inspected") == "1":
                 obsolete_preview = workflow.load_previous_block_templates(record.id)
             if record and request.args.get("schedules_inspected") == "1":
                 schedule_preview = workflow.load_selectable_schedules(record.id)
-            if request.args.get("library_inspected") == "1":
+            if request.args.get("library_inspected") == "1" and not library_deletion:
                 library_preview = workflow.load_workout_library()
             previous_plan = workflow.finished_previous_block() if record else None
         return render_template(
@@ -430,6 +431,7 @@ def create_app(config=None):
             obsolete_preview=obsolete_preview,
             schedule_preview=schedule_preview,
             library_preview=library_preview,
+            library_deletion=library_deletion,
         )
 
     @app.post("/cleanup/library/inspect")
@@ -444,9 +446,14 @@ def create_app(config=None):
         with _state(app) as state:
             workflow = PlannerWorkflow(state)
             preview = workflow.load_workout_library()
-            actions = workflow.delete_selected_workouts(preview, selected_workout_ids)
-        flash(f"Deleted {len(actions)} selected workout template{'s' if len(actions) != 1 else ''}.", "success")
-        return redirect(url_for("cleanup"))
+            result = workflow.start_workout_library_deletion(preview, selected_workout_ids)
+        return _workout_library_deletion_redirect(result)
+
+    @app.post("/cleanup/library/continue")
+    def continue_workout_library_deletion():
+        with _state(app) as state:
+            result = PlannerWorkflow(state).continue_workout_library_deletion()
+        return _workout_library_deletion_redirect(result)
 
     @app.post("/cleanup/schedules/inspect")
     def inspect_selectable_schedules():
@@ -758,6 +765,21 @@ def create_app(config=None):
 
 def _state(app):
     return AppState(app.config["DATA_DIR"])
+
+
+def _workout_library_deletion_redirect(result):
+    completed = len(result.get("actions", []))
+    remaining = len(result.get("pending", []))
+    if result.get("status") == "completed":
+        flash(
+            f"Workout-library cleanup completed: {completed} template{'s' if completed != 1 else ''} "
+            "deleted or reconciled.",
+            "success",
+        )
+        return redirect(url_for("cleanup", library_inspected=1))
+    if result.get("status") == "paused":
+        flash(result.get("last_error") or "Garmin paused the deletion. Retry to continue safely.", "warning")
+    return redirect(url_for("cleanup", library_inspected=1, library_deletion=1, remaining=remaining))
 
 
 def _workout_rows(state, plan, today):

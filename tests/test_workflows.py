@@ -649,3 +649,74 @@ def test_workflow_bulk_workout_cleanup_splits_legacy_and_official_deletion(tmp_p
         official.delete_workout.assert_called_once_with(202)
         assert OfficialObjectRegistry(state.data_dir / "starter-api", "runner").workout("Official run") is None
         assert {item["source"] for item in actions} == {"legacy", "official"}
+
+
+def test_workflow_workout_cleanup_checkpoints_partial_success_and_resumes(tmp_path, monkeypatch):
+    workouts = [
+        {
+            "workoutId": workout_id,
+            "workoutName": name,
+            "sportType": {"sportTypeId": 1, "sportTypeKey": "running"},
+        }
+        for workout_id, name in ((101, "A run"), (102, "B run"), (103, "C run"))
+    ]
+    legacy = MagicMock()
+    legacy.list_workouts.return_value = workouts
+    legacy.delete_workout.side_effect = [None, RuntimeError("upstream timeout")]
+    legacy_context = MagicMock()
+    legacy_context.__enter__.return_value = legacy
+
+    with AppState(tmp_path / "state") as state:
+        workflow = PlannerWorkflow(state)
+        monkeypatch.setattr(workflow, "garmin_client", MagicMock(return_value=legacy_context))
+        preview = workflow.inspect_workout_library()
+
+        started = workflow.start_workout_library_deletion(preview, [101, 102, 103])
+        paused = workflow.continue_workout_library_deletion()
+
+        assert started["status"] == "running"
+        assert [item["workout_id"] for item in started["actions"]] == [101]
+        assert paused["status"] == "paused"
+        assert [item["workout_id"] for item in paused["pending"]] == [102, 103]
+        assert [item["workout_id"] for item in paused["actions"]] == [101]
+        assert "retry to continue" in paused["last_error"]
+        assert [item["workout_id"] for item in workflow.load_workout_library()["workouts"]] == [102, 103]
+
+        legacy.list_workouts.return_value = workouts[1:]
+        legacy.delete_workout.side_effect = None
+        resumed = workflow.continue_workout_library_deletion()
+        completed = workflow.continue_workout_library_deletion()
+
+        assert resumed["status"] == "running"
+        assert completed["status"] == "completed"
+        assert completed["pending"] == []
+        assert [item["workout_id"] for item in completed["actions"]] == [101, 102, 103]
+        assert workflow.load_workout_library_deletion() is None
+        assert workflow.load_workout_library()["workouts"] == []
+
+
+def test_workflow_workout_cleanup_reconciles_item_already_missing_remotely(tmp_path, monkeypatch):
+    legacy = MagicMock()
+    legacy.list_workouts.return_value = []
+    legacy_context = MagicMock()
+    legacy_context.__enter__.return_value = legacy
+    preview = {
+        "mode": "preview-only",
+        "workouts": [
+            {"name": "Already gone", "workout_id": 101, "source": "legacy", "action": "delete"}
+        ],
+        "summary": {"selectable_workout_templates": 1},
+        "warnings": [],
+    }
+
+    with AppState(tmp_path / "state") as state:
+        workflow = PlannerWorkflow(state)
+        monkeypatch.setattr(workflow, "garmin_client", MagicMock(return_value=legacy_context))
+        workflow._write_private_json(workflow._workout_library_path(), preview)
+
+        result = workflow.start_workout_library_deletion(preview, [101])
+
+        assert result["status"] == "completed"
+        assert result["actions"][0]["action"] == "reconciled-missing-workout-template"
+        legacy.delete_workout.assert_not_called()
+        assert workflow.load_workout_library()["workouts"] == []
