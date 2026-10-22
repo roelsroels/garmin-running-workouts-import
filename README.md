@@ -158,6 +158,12 @@ web dashboard. Select **Inspect previous-block workouts**, review the exact temp
 choose **Delete obsolete templates**. This is an idempotent one-time migration: repeating the inspection reports zero
 candidates once cleanup is complete. It does not unschedule calendar history or delete completed activities.
 
+To remove planned calendar entries individually, open **Garmin cleanup** and choose **Load planned Garmin runs**.
+The page lists the active block's matching Garmin schedules—including past or missed dates—with individual checkboxes
+and a **Select all** option. Approval unschedules only the checked entries. Future entries are marked skipped in the
+local calendar so they no longer count as remaining; completed activity/FIT records and workout-library templates are
+not deleted.
+
 During goal setup, optional heart-rate guidance can be configured separately for warm-up/cooldown, easy running, long runs, quality work, and interval recovery. Choose upper BPM caps, BPM ranges, or Garmin zones. These are user-supplied watch alerts—not calculated or clinically validated zones. Garmin supports only one intensity target per step, so when quality work has both goal pace and HR guidance, the wizard asks which target should be primary.
 
 The main menu also includes **Create a one-off heart-rate workout**. It builds sequential time-based steps interactively, enabling workouts such as 10 minutes at a 120 bpm maximum followed by 15 minutes at a 140 bpm maximum without editing YAML.
@@ -212,6 +218,8 @@ The web dashboard provides:
 - two-stage Garmin login when an account requires an authenticator, email, or SMS verification code;
 - an explicit Garmin conflict inspection and removal decision before application;
 - protected cleanup of duplicates already present in Garmin;
+- selectable active-block calendar cleanup, including past or missed schedules, with individual checkboxes and a
+  **Select all** control that never deletes completed activities or workout templates;
 - preview-first one-time cleanup of obsolete templates left by the immediately preceding finished block;
 - a dynamic one-off heart-rate workout builder;
 - Garmin reconnection without storing the password; and

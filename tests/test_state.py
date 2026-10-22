@@ -71,6 +71,42 @@ def test_state_persists_goal_plan_and_progress(tmp_path):
         }
 
 
+def test_removed_future_schedule_stays_skipped_after_activity_refresh(tmp_path):
+    workout_date = date(2030, 1, 10)
+    with AppState(tmp_path / "state") as state:
+        goal = state.save_goal(
+            Goal(
+                goal_type="complete_distance",
+                description="Complete ten kilometres",
+                start_date=workout_date,
+                target_distance_km=10,
+            )
+        )
+        config = {
+            "name": "Block",
+            "workouts": [
+                {
+                    "date": workout_date.isoformat(),
+                    "sport": "running",
+                    "name": "Skipped run",
+                    "steps": [{"type": "interval", "duration": "30:00"}],
+                }
+            ],
+        }
+        plan = state.save_plan(goal, config, state.plans_dir / "block.yaml", "high", ())
+
+        changed = state.mark_workouts_skipped(
+            [plan.id],
+            [(workout_date.isoformat(), "Skipped run")],
+            today=date(2030, 1, 1),
+        )
+        refreshed = state.refresh_progress(plan.id, [], today=date(2030, 1, 2))
+
+        assert changed == 1
+        assert refreshed[0]["status"] == "skipped"
+        assert state.progress_summary(plan.id)["remaining"] == 0
+
+
 def test_state_persists_completed_activity_metrics(tmp_path):
     with AppState(tmp_path / "state") as state:
         goal = state.save_goal(_goal())

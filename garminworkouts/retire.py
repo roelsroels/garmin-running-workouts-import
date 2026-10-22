@@ -139,6 +139,82 @@ class ScheduledConflictCleanup:
         return items
 
 
+class SelectablePlanScheduleCleanup:
+    """List and selectively remove Garmin calendar entries for one local plan."""
+
+    def __init__(self, plan, connection, today=None):
+        self.plan = plan
+        self.connection = connection
+        self.today = today or date.today()
+
+    def preview(self):
+        require_connection_capabilities(
+            self.connection,
+            "inspect selectable Garmin schedules",
+            *CURRENT_PLAN_RETIRE_PREVIEW_CAPABILITIES,
+        )
+        plan_keys = {(entry["date"].isoformat(), entry["workout"].get_workout_name()) for entry in self.plan.entries}
+        workout_names = {}
+        for workout in self.connection.list_workouts():
+            if not RunningWorkout.is_running(workout):
+                continue
+            name = RunningWorkout.extract_workout_name(workout)
+            if any(key[1] == name for key in plan_keys):
+                workout_names[str(RunningWorkout.extract_workout_id(workout))] = name
+
+        calendar = []
+        seen = set()
+        for item in self._scheduled_items():
+            name = workout_names.get(str(item["workout_id"]))
+            if name is None or (item["date"], name) not in plan_keys:
+                continue
+            schedule_id = item.get("scheduled_workout_id")
+            key = (str(schedule_id), str(item["workout_id"]), item["date"])
+            if key in seen:
+                continue
+            seen.add(key)
+            calendar.append(
+                {
+                    "date": item["date"],
+                    "name": name,
+                    "workout_id": item["workout_id"],
+                    "scheduled_workout_id": schedule_id,
+                    "action": "unschedule" if schedule_id is not None else "unresolved-schedule-id",
+                    "timing": _schedule_timing(item["date"], self.today),
+                }
+            )
+        calendar.sort(key=lambda item: (item["date"], item["name"], str(item["scheduled_workout_id"])))
+        return _selectable_schedule_preview(self.plan.name, self.today, calendar)
+
+    def apply(self, preview, selected_schedule_ids):
+        selected = _validated_selected_schedule_ids(preview, selected_schedule_ids)
+        require_connection_capabilities(
+            self.connection,
+            "remove selected Garmin schedules",
+            GarminCapability.CALENDAR_UNSCHEDULE,
+        )
+        actions = []
+        for item in preview["calendar"]:
+            if str(item.get("scheduled_workout_id")) not in selected:
+                continue
+            self.connection.unschedule_workout(item["scheduled_workout_id"])
+            actions.append(
+                {
+                    "action": "unscheduled-selected",
+                    **{key: item[key] for key in ("date", "name", "workout_id", "scheduled_workout_id")},
+                }
+            )
+        return actions
+
+    def _scheduled_items(self):
+        months = {(entry["date"].year, entry["date"].month) for entry in self.plan.entries}
+        items = []
+        for year, month in sorted(months):
+            response = self.connection.list_scheduled_workouts(year, month)
+            items.extend(PlanRetirement._extract_scheduled_items(response))
+        return items
+
+
 class PlanRetirement:
     def __init__(
         self,
@@ -401,3 +477,47 @@ class PlanRetirement:
             if isinstance(nested, dict | list):
                 items.extend(cls._extract_scheduled_items(nested, date_value))
         return items
+
+
+def _schedule_timing(workout_date, today):
+    workout_date = date.fromisoformat(str(workout_date)[:10])
+    if workout_date < today:
+        return "past"
+    if workout_date == today:
+        return "today"
+    return "upcoming"
+
+
+def _selectable_schedule_preview(plan_name, today, calendar):
+    selectable = sum(item["action"] == "unschedule" for item in calendar)
+    unresolved = sum(item["action"] == "unresolved-schedule-id" for item in calendar)
+    return {
+        "plan": plan_name,
+        "today": today.isoformat(),
+        "mode": "preview-only; no Garmin Connect changes were made",
+        "calendar": calendar,
+        "summary": {
+            "selectable_calendar_entries": selectable,
+            "past_calendar_entries": sum(item["timing"] == "past" for item in calendar),
+            "unresolved_calendar_entries": unresolved,
+        },
+        "warnings": [
+            "Only calendar entries matching the active local training block are shown.",
+            "Removing an entry does not delete its workout template or any completed activity/FIT record.",
+        ],
+    }
+
+
+def _validated_selected_schedule_ids(preview, selected_schedule_ids):
+    selected = {str(value) for value in selected_schedule_ids if str(value).strip()}
+    if not selected:
+        raise ValueError("Select at least one Garmin calendar entry to remove")
+    allowed = {
+        str(item["scheduled_workout_id"])
+        for item in preview.get("calendar", [])
+        if item.get("action") == "unschedule" and item.get("scheduled_workout_id") is not None
+    }
+    unknown = selected - allowed
+    if unknown:
+        raise ValueError("The selected Garmin calendar entries were not part of the inspected schedule")
+    return selected

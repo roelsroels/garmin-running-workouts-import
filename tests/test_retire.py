@@ -3,7 +3,12 @@ from datetime import date
 import pytest
 
 from garminworkouts.models.training_plan import TrainingPlan
-from garminworkouts.retire import PlanRetirement, ScheduledConflictCleanup, combined_training_plan
+from garminworkouts.retire import (
+    PlanRetirement,
+    ScheduledConflictCleanup,
+    SelectablePlanScheduleCleanup,
+    combined_training_plan,
+)
 
 
 def _plan(entries, name="Old block"):
@@ -378,3 +383,50 @@ def test_conflict_cleanup_keeps_one_exact_schedule_and_removes_extra_duplicates(
     assert [item["scheduled_workout_id"] for item in preview["calendar"]] == [202]
     assert connection.unscheduled == [202]
     assert connection.deleted == []
+
+
+def test_selectable_schedule_cleanup_includes_past_and_future_and_only_removes_checked_entry():
+    plan = _plan([("2026-08-06", "260806 Missed"), ("2026-08-13", "260813 Next")])
+    connection = FakeConnection(
+        workouts=[
+            _workout(101, "260806 Missed"),
+            _workout(102, "260813 Next"),
+            _workout(103, "Unrelated"),
+        ],
+        scheduled={
+            "calendarItems": [
+                {"id": 201, "workoutId": 101, "date": "2026-08-06"},
+                {"id": 202, "workoutId": 102, "date": "2026-08-13"},
+                {"id": 203, "workoutId": 103, "date": "2026-08-13"},
+            ]
+        },
+    )
+    cleanup = SelectablePlanScheduleCleanup(plan, connection, today=date(2026, 8, 10))
+
+    preview = cleanup.preview()
+    actions = cleanup.apply(preview, [201])
+
+    assert preview["summary"] == {
+        "selectable_calendar_entries": 2,
+        "past_calendar_entries": 1,
+        "unresolved_calendar_entries": 0,
+    }
+    assert [item["timing"] for item in preview["calendar"]] == ["past", "upcoming"]
+    assert connection.unscheduled == [201]
+    assert actions[0]["name"] == "260806 Missed"
+
+
+def test_selectable_schedule_cleanup_rejects_uninspected_or_empty_selection():
+    plan = _plan([("2026-08-13", "260813 Next")])
+    connection = FakeConnection(
+        workouts=[_workout(102, "260813 Next")],
+        scheduled={"calendarItems": [{"id": 202, "workoutId": 102, "date": "2026-08-13"}]},
+    )
+    cleanup = SelectablePlanScheduleCleanup(plan, connection, today=date(2026, 8, 10))
+    preview = cleanup.preview()
+
+    with pytest.raises(ValueError, match="Select at least one"):
+        cleanup.apply(preview, [])
+    with pytest.raises(ValueError, match="not part of the inspected schedule"):
+        cleanup.apply(preview, [999])
+    assert connection.unscheduled == []

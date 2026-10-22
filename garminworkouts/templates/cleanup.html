@@ -27,6 +27,37 @@
       {% endif %}
     </section>
 
+    <section class="card schedule-cleanup">
+      <p class="eyebrow">Scheduled calendar entries</p>
+      <h2>Remove selected planned runs</h2>
+      <p class="muted">Load Garmin calendar entries that match this active training block, including past or missed dates. Select individual entries or use Select all. This only unschedules the selected entries; workout templates and completed activities remain untouched.</p>
+      {% if schedule_preview is none %}
+        <form method="post" action="{{ url_for('inspect_selectable_schedules') }}" data-loading-message="Loading planned runs…" data-loading-detail="Reading the Garmin calendar without making changes."><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button secondary">Load planned Garmin runs</button></form>
+      {% else %}
+        {% set selectable_count = schedule_preview.summary.selectable_calendar_entries %}
+        {% if selectable_count %}
+          <form class="form-stack" id="selectable-schedules-form" method="post" action="{{ url_for('remove_selected_schedules') }}" data-loading-message="Removing selected planned runs…" data-loading-detail="Only the checked Garmin calendar entries are being unscheduled. Completed activities remain untouched.">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <label class="consent select-all-control"><input type="checkbox" id="select-all-schedules"><span><strong>Select all {{ selectable_count }} removable entries</strong><small>You can clear individual entries below before applying.</small></span></label>
+            <div class="selectable-schedule-list">
+              {% for item in schedule_preview.calendar %}
+                <label class="selectable-schedule{% if item.timing == 'past' %} is-past{% endif %}">
+                  <input type="checkbox" name="schedule_ids" value="{{ item.scheduled_workout_id }}" {% if item.action != 'unschedule' %}disabled{% endif %}>
+                  <time>{{ item.date }}</time>
+                  <span><strong>{{ item.name }}</strong><small>{{ 'Past / missed date' if item.timing == 'past' else ('Today' if item.timing == 'today' else 'Upcoming') }}</small></span>
+                  <span class="status-pill {{ 'alert' if item.timing == 'past' else '' }}">{{ 'Unavailable' if item.action != 'unschedule' else 'Scheduled' }}</span>
+                </label>
+              {% endfor %}
+            </div>
+            <button class="button danger" id="remove-selected-schedules" disabled>Remove selected entries</button>
+          </form>
+        {% else %}
+          <p class="muted">No removable Garmin calendar entries match the active training block.</p>
+        {% endif %}
+        {% if schedule_preview.summary.unresolved_calendar_entries %}<p class="warning-text">{{ schedule_preview.summary.unresolved_calendar_entries }} matching entry or entries could not be selected because Garmin did not return a schedule ID.</p>{% endif %}
+      {% endif %}
+    </section>
+
     {% if preview is none %}
       <section class="approval-box"><div><p class="eyebrow">Calendar</p><h2>Inspect schedule overlaps</h2><p>This read-only check compares the active plan with Garmin’s calendar.</p></div><form method="post" action="{{ url_for('inspect_cleanup') }}" data-loading-message="Checking Garmin’s calendar…" data-loading-detail="Comparing scheduled runs without making changes."><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button secondary">Inspect Garmin schedule</button></form></section>
     {% else %}

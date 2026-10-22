@@ -744,6 +744,89 @@ def test_cleanup_offers_one_time_previous_block_template_removal(tmp_path, monke
     assert cleaned == [(current.id, preview)]
 
 
+def test_cleanup_selects_individual_or_all_active_plan_schedules(tmp_path, monkeypatch):
+    today = date.today()
+    config = {
+        "name": "Selectable block",
+        "workouts": [
+            {
+                "date": (today + timedelta(days=1)).isoformat(),
+                "sport": "running",
+                "name": "Tomorrow easy",
+                "steps": [{"type": "interval", "duration": "30:00"}],
+            }
+        ],
+    }
+    app = _app(tmp_path)
+    with AppState(app.config["DATA_DIR"]) as state:
+        goal = state.save_goal(
+            Goal(
+                goal_type="complete_distance",
+                description="Complete ten kilometres",
+                start_date=today,
+                target_distance_km=10,
+            )
+        )
+        record = state.save_plan(goal, config, state.plans_dir / "selectable.yaml", "high", ())
+        state.activate_plan(record.id)
+
+    preview = {
+        "plan": "Selectable block",
+        "today": today.isoformat(),
+        "mode": "preview-only",
+        "calendar": [
+            {
+                "date": (today - timedelta(days=1)).isoformat(),
+                "name": "Missed run",
+                "workout_id": 10,
+                "scheduled_workout_id": 101,
+                "action": "unschedule",
+                "timing": "past",
+            },
+            {
+                "date": (today + timedelta(days=1)).isoformat(),
+                "name": "Tomorrow easy",
+                "workout_id": 11,
+                "scheduled_workout_id": 102,
+                "action": "unschedule",
+                "timing": "upcoming",
+            },
+        ],
+        "summary": {
+            "selectable_calendar_entries": 2,
+            "past_calendar_entries": 1,
+            "unresolved_calendar_entries": 0,
+        },
+        "warnings": [],
+    }
+    monkeypatch.setattr(PlannerWorkflow, "load_selectable_schedules", lambda _workflow, _plan_id: preview)
+    removed = []
+    monkeypatch.setattr(
+        PlannerWorkflow,
+        "remove_selected_schedules",
+        lambda _workflow, active, expected, selected: (
+            removed.append((active.id, expected, selected)) or [{"action": "unscheduled-selected"}]
+        ),
+    )
+    client = app.test_client()
+
+    page = client.get("/cleanup?schedules_inspected=1")
+    assert page.status_code == 200
+    assert b"Select all 2 removable entries" in page.data
+    assert b"Past / missed date" in page.data
+    assert b'name="schedule_ids" value="101"' in page.data
+    assert b'id="remove-selected-schedules" disabled' in page.data
+
+    response = client.post(
+        "/cleanup/schedules/apply",
+        data={"csrf_token": _csrf(client), "schedule_ids": ["101", "102"]},
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert b"Removed 1 selected calendar entry." in response.data
+    assert removed == [(record.id, preview, ["101", "102"])]
+
+
 def test_finished_dashboard_offers_next_training_block(tmp_path, monkeypatch):
     app = _app(tmp_path)
     finished_date = date.today() - timedelta(days=1)

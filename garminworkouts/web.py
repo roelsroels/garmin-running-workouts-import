@@ -411,10 +411,13 @@ def create_app(config=None):
             workflow = PlannerWorkflow(state)
             preview = None
             obsolete_preview = None
+            schedule_preview = None
             if record and request.args.get("inspected") == "1":
                 preview = workflow.load_active_conflicts(record.id)
             if record and request.args.get("obsolete_inspected") == "1":
                 obsolete_preview = workflow.load_previous_block_templates(record.id)
+            if record and request.args.get("schedules_inspected") == "1":
+                schedule_preview = workflow.load_selectable_schedules(record.id)
             previous_plan = workflow.finished_previous_block() if record else None
         return render_template(
             "cleanup.html",
@@ -422,7 +425,27 @@ def create_app(config=None):
             preview=preview,
             previous_plan=previous_plan,
             obsolete_preview=obsolete_preview,
+            schedule_preview=schedule_preview,
         )
+
+    @app.post("/cleanup/schedules/inspect")
+    def inspect_selectable_schedules():
+        with _state(app) as state:
+            PlannerWorkflow(state).inspect_selectable_schedules()
+        return redirect(url_for("cleanup", schedules_inspected=1))
+
+    @app.post("/cleanup/schedules/apply")
+    def remove_selected_schedules():
+        selected_schedule_ids = request.form.getlist("schedule_ids")
+        with _state(app) as state:
+            record = state.active_plan()
+            if not record:
+                raise ValueError("There is no active plan")
+            workflow = PlannerWorkflow(state)
+            preview = workflow.load_selectable_schedules(record.id)
+            actions = workflow.remove_selected_schedules(record, preview, selected_schedule_ids)
+        flash(f"Removed {len(actions)} selected calendar entr{'y' if len(actions) == 1 else 'ies'}.", "success")
+        return redirect(url_for("cleanup"))
 
     @app.post("/cleanup/inspect")
     def inspect_cleanup():

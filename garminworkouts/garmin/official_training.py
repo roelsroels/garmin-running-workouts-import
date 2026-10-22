@@ -268,6 +268,48 @@ class OfficialTrainingPublisher:
                 actions.append({"action": "deleted-conflicting-workout-template", **item})
         return actions
 
+    def preview_plan_schedules(self):
+        """Return remotely scheduled entries that exactly match the local plan."""
+        plan_keys = {(entry["date"].isoformat(), entry["workout"].get_workout_name()) for entry in self.plan.entries}
+        calendar = []
+        workout_cache = {}
+        for item in self._remote_schedules(self.plan.entries):
+            name = self._workout_name(item["workout_id"], workout_cache)
+            if (item["date"], name) not in plan_keys:
+                continue
+            schedule_id = item.get("schedule_id")
+            calendar.append(
+                {
+                    "date": item["date"],
+                    "name": name,
+                    "workout_id": item["workout_id"],
+                    "scheduled_workout_id": schedule_id,
+                    "action": "unschedule" if schedule_id is not None else "unresolved-schedule-id",
+                    "timing": _schedule_timing(item["date"], self.today),
+                }
+            )
+        calendar.sort(key=lambda item: (item["date"], item["name"], str(item["scheduled_workout_id"])))
+        return _selectable_schedule_preview(self.plan.name, self.today, calendar)
+
+    def apply_selected_schedules(self, preview, selected_schedule_ids):
+        selected = _validated_selected_schedule_ids(preview, selected_schedule_ids)
+        actions = []
+        for item in preview["calendar"]:
+            if str(item.get("scheduled_workout_id")) not in selected:
+                continue
+            try:
+                self.connection.unschedule_workout(item["scheduled_workout_id"])
+            except GarminStarterNotFoundError:
+                pass
+            self.registry.forget_schedule(schedule_id=item["scheduled_workout_id"])
+            actions.append(
+                {
+                    "action": "unscheduled-selected",
+                    **{key: item[key] for key in ("date", "name", "workout_id", "scheduled_workout_id")},
+                }
+            )
+        return actions
+
     def retire(self, old_plan, old_plan_ids, protected_plan=None, delete_finished_templates=False):
         old_plan_ids = {str(value) for value in old_plan_ids}
         protected_names = {
@@ -432,6 +474,47 @@ def _deduplicate_schedules(items):
             seen.add(key)
             result.append(item)
     return result
+
+
+def _schedule_timing(workout_date, today):
+    workout_date = date.fromisoformat(str(workout_date)[:10])
+    if workout_date < today:
+        return "past"
+    if workout_date == today:
+        return "today"
+    return "upcoming"
+
+
+def _selectable_schedule_preview(plan_name, today, calendar):
+    return {
+        "plan": plan_name,
+        "today": today.isoformat(),
+        "mode": "preview-only; no Garmin Connect changes were made",
+        "calendar": calendar,
+        "summary": {
+            "selectable_calendar_entries": sum(item["action"] == "unschedule" for item in calendar),
+            "past_calendar_entries": sum(item["timing"] == "past" for item in calendar),
+            "unresolved_calendar_entries": sum(item["action"] == "unresolved-schedule-id" for item in calendar),
+        },
+        "warnings": [
+            "Only calendar entries matching the active local training block are shown.",
+            "Removing an entry does not delete its workout template or any completed activity/FIT record.",
+        ],
+    }
+
+
+def _validated_selected_schedule_ids(preview, selected_schedule_ids):
+    selected = {str(value) for value in selected_schedule_ids if str(value).strip()}
+    if not selected:
+        raise ValueError("Select at least one Garmin calendar entry to remove")
+    allowed = {
+        str(item["scheduled_workout_id"])
+        for item in preview.get("calendar", [])
+        if item.get("action") == "unschedule" and item.get("scheduled_workout_id") is not None
+    }
+    if selected - allowed:
+        raise ValueError("The selected Garmin calendar entries were not part of the inspected schedule")
+    return selected
 
 
 def _find_id(value, key):

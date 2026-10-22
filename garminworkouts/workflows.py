@@ -17,7 +17,12 @@ from garminworkouts.models.training_plan import TrainingPlan
 from garminworkouts.plan import PlanApplier
 from garminworkouts.planner import DeterministicPlanner, write_plan
 from garminworkouts.replanning import calendar_changes, immutable_workout_keys, validate_mutable_replacement
-from garminworkouts.retire import PlanRetirement, ScheduledConflictCleanup, combined_training_plan
+from garminworkouts.retire import (
+    PlanRetirement,
+    ScheduledConflictCleanup,
+    SelectablePlanScheduleCleanup,
+    combined_training_plan,
+)
 
 
 class GarminAuthenticationRequiredError(ValueError):
@@ -561,6 +566,58 @@ class PlannerWorkflow:
         )
         return actions
 
+    def inspect_selectable_schedules(self):
+        record = self.state.active_plan()
+        if not record:
+            raise ValueError("There is no active plan to inspect")
+        plan = combined_training_plan(self.state.block_lineage(record.id), name=record.name)
+        with self.training_client() as connection:
+            if self.training_provider_key() == "starter":
+                preview = self._official_publisher(plan, connection, record.id).preview_plan_schedules()
+            else:
+                preview = SelectablePlanScheduleCleanup(plan, connection, today=self.today).preview()
+        self._write_private_json(self._selectable_schedules_path(record.id), preview)
+        return record, preview
+
+    def load_selectable_schedules(self, plan_id):
+        return self._read_json(self._selectable_schedules_path(plan_id))
+
+    def remove_selected_schedules(self, record, expected, selected_schedule_ids):
+        current = self.state.active_plan()
+        if current is None or current.id != record.id:
+            raise ValueError("The active plan changed after inspection. Inspect the schedule again.")
+        plan_records = self.state.block_lineage(current.id)
+        plan = combined_training_plan(plan_records, name=current.name)
+        with self.training_client() as connection:
+            if self.training_provider_key() == "starter":
+                cleanup = self._official_publisher(plan, connection, current.id)
+                preview = cleanup.preview_plan_schedules()
+            else:
+                cleanup = SelectablePlanScheduleCleanup(plan, connection, today=self.today)
+                preview = cleanup.preview()
+            if preview != expected:
+                raise ValueError("The Garmin schedule changed after inspection. Inspect it again before applying.")
+            actions = (
+                cleanup.apply_selected_schedules(preview, selected_schedule_ids)
+                if self.training_provider_key() == "starter"
+                else cleanup.apply(preview, selected_schedule_ids)
+            )
+        removed_keys = {(item["date"], item["name"]) for item in actions}
+        skipped = self.state.mark_workouts_skipped(
+            [item.id for item in plan_records],
+            removed_keys,
+            today=self.today,
+        )
+        self.state.record_event(
+            "selected-schedules-removed-from-web",
+            {
+                "active_plan_id": current.id,
+                "actions": actions,
+                "future_workouts_marked_skipped": skipped,
+            },
+        )
+        return actions
+
     def inspect_previous_block_templates(self):
         record, previous = self._finished_previous_block()
         active_plan = combined_training_plan(self.state.block_lineage(record.id), name=record.name)
@@ -796,6 +853,9 @@ class PlannerWorkflow:
 
     def _cleanup_conflict_path(self, plan_id):
         return self._web_state_dir / f"cleanup-{int(plan_id)}-conflicts.json"
+
+    def _selectable_schedules_path(self, plan_id):
+        return self._web_state_dir / f"cleanup-{int(plan_id)}-selectable-schedules.json"
 
     def _obsolete_cleanup_path(self, plan_id):
         return self._web_state_dir / f"cleanup-{int(plan_id)}-obsolete-templates.json"

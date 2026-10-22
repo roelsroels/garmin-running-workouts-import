@@ -374,7 +374,7 @@ class AppState:
             activities_by_date.setdefault(activity.date.isoformat(), activity)
         rows = self.connection.execute(
             """
-            SELECT workout_date, workout_name, activity_id, actual_distance_m,
+            SELECT workout_date, workout_name, status, activity_id, actual_distance_m,
                    execution_score, execution_score_checked_at
             FROM plan_progress WHERE plan_id = ? ORDER BY workout_date
             """,
@@ -410,6 +410,12 @@ class AppState:
                         if same_activity
                         else None
                     )
+                elif row["status"] == "skipped":
+                    status = "skipped"
+                    activity_id = None
+                    actual_distance_m = None
+                    execution_score = None
+                    execution_score_checked_at = None
                 elif workout_date < today:
                     status = "missed"
                     activity_id = None
@@ -453,6 +459,32 @@ class AppState:
             (plan_id,),
         ).fetchall()
         return [dict(row) for row in rows]
+
+    def mark_workouts_skipped(self, plan_ids, workout_keys, today=None):
+        """Stop locally counting removed future Garmin schedules as remaining."""
+        today = today or date.today()
+        plan_ids = {int(value) for value in plan_ids}
+        workout_keys = {(str(workout_date)[:10], str(name)) for workout_date, name in workout_keys}
+        if not plan_ids or not workout_keys:
+            return 0
+        now = _now()
+        changed = 0
+        with self.connection:
+            for plan_id in plan_ids:
+                for workout_date, workout_name in workout_keys:
+                    if date.fromisoformat(workout_date) < today:
+                        continue
+                    cursor = self.connection.execute(
+                        """
+                        UPDATE plan_progress
+                        SET status = 'skipped', updated_at = ?
+                        WHERE plan_id = ? AND workout_date = ? AND workout_name = ?
+                          AND status = 'scheduled'
+                        """,
+                        (now, plan_id, workout_date, workout_name),
+                    )
+                    changed += cursor.rowcount
+        return changed
 
     def progress_summary(self, plan_id):
         rows = self.progress(plan_id)

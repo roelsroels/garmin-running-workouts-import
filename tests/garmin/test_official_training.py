@@ -141,3 +141,29 @@ def test_official_finished_plan_retirement_keeps_past_calendar_but_deletes_owned
     connection.unschedule_workout.assert_not_called()
     connection.delete_workout.assert_called_once_with(42)
     assert actions == [{"action": "deleted-workout-template", "name": "Old easy", "workout_id": 42}]
+
+
+def test_official_selectable_schedule_cleanup_includes_untracked_exact_entries(tmp_path):
+    plan = _plan(("2029-12-20", "Missed"), ("2030-01-06", "Next"))
+    registry = OfficialObjectRegistry(tmp_path / "starter-api", "runner")
+    registry.record_workout("Next", 42, "hash")
+    registry.record_schedule("2030-01-06", "Next", 84, 42, 7)
+    connection = MagicMock()
+    connection.list_scheduled_workouts.return_value = [
+        {"scheduleId": 81, "workoutId": 99, "date": "2029-12-20"},
+        {"scheduleId": 84, "workoutId": 42, "date": "2030-01-06"},
+    ]
+    connection.get_workout.side_effect = [
+        {"workoutId": 99, "workoutName": "Missed"},
+        {"workoutId": 42, "workoutName": "Next"},
+    ]
+    publisher = OfficialTrainingPublisher(plan, connection, registry, 7, today=date(2030, 1, 1))
+
+    preview = publisher.preview_plan_schedules()
+    actions = publisher.apply_selected_schedules(preview, [81, 84])
+
+    assert preview["summary"]["selectable_calendar_entries"] == 2
+    assert preview["summary"]["past_calendar_entries"] == 1
+    assert connection.unschedule_workout.call_count == 2
+    assert registry.schedule("2030-01-06", "Next") is None
+    assert {item["scheduled_workout_id"] for item in actions} == {81, 84}

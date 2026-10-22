@@ -241,6 +241,15 @@ label small { color: var(--muted); font-weight: 400; line-height: 1.4; }
 .conflict-list > div { display: grid; grid-template-columns: 8rem 1fr auto; gap: 1rem; padding: .8rem 0; border-top: 1px solid var(--line); align-items: center; }
 .conflict-list time { color: var(--amber); }
 .conflict-list span { color: var(--muted); font-size: .8rem; }
+.schedule-cleanup { display: grid; gap: 1rem; }
+.selectable-schedule-list { display: grid; gap: .55rem; }
+.selectable-schedule { display: grid; grid-template-columns: auto 8rem 1fr auto; align-items: center; gap: 1rem; padding: .8rem; border: 1px solid var(--line); border-radius: 10px; background: var(--inset-bg); }
+.selectable-schedule input { width: 18px; height: 18px; accent-color: var(--mint); }
+.selectable-schedule time { color: var(--amber); font-variant-numeric: tabular-nums; }
+.selectable-schedule strong, .selectable-schedule small { display: block; }
+.selectable-schedule small { color: var(--muted); font-weight: 400; }
+.selectable-schedule.is-past { background: var(--finished-bg); }
+.selectable-schedule.is-past time { color: var(--muted); }
 .warning-text { color: var(--amber); margin: 1rem 0 0; }
 .status-pill { display: inline-flex; align-items: center; width: fit-content; min-height: 28px; padding: .25rem .7rem; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); font-size: .75rem; text-transform: uppercase; letter-spacing: .08em; }
 .status-pill.safe, .status-pill.completed { color: var(--mint); border-color: var(--border-good); }
@@ -330,6 +339,8 @@ body.is-waiting { overflow: hidden; }
   .field-grid.two, .field-grid.three { grid-template-columns: 1fr; }
   .hr-row { grid-template-columns: 1fr; }
   .schedule-row { grid-template-columns: 1fr; gap: .35rem; }
+  .selectable-schedule { grid-template-columns: auto 1fr; }
+  .selectable-schedule time, .selectable-schedule .status-pill { grid-column: 2; }
   .schedule-row.is-next-action::before { width: fit-content; }
   .step-row { grid-template-columns: 2rem 1fr; }
   .step-row label { grid-column: 2; }

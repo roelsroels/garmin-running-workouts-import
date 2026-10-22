@@ -66,6 +66,20 @@ function hideWaitState() {
   document.querySelectorAll('form[aria-busy="true"]').forEach((form) => form.removeAttribute("aria-busy"));
 }
 
+function refreshScheduleSelection() {
+  const form = document.querySelector("#selectable-schedules-form");
+  if (!form) return;
+  const entries = Array.from(form.querySelectorAll('input[name="schedule_ids"]:not(:disabled)'));
+  const selectAll = form.querySelector("#select-all-schedules");
+  const submit = form.querySelector("#remove-selected-schedules");
+  const selected = entries.filter((input) => input.checked).length;
+  if (selectAll) {
+    selectAll.checked = entries.length > 0 && selected === entries.length;
+    selectAll.indeterminate = selected > 0 && selected < entries.length;
+  }
+  if (submit) submit.disabled = selected === 0;
+}
+
 document.addEventListener("click", (event) => {
   if (event.target.closest("#add-step")) {
     const list = document.querySelector("#steps");
@@ -88,6 +102,13 @@ document.addEventListener("click", (event) => {
 document.addEventListener("change", (event) => {
   if (event.target.matches("#goal-type")) refreshGoalFields();
   if (event.target.matches("#llm-provider")) refreshLLMFields(true);
+  if (event.target.matches("#select-all-schedules")) {
+    document.querySelectorAll('#selectable-schedules-form input[name="schedule_ids"]:not(:disabled)').forEach((input) => {
+      input.checked = event.target.checked;
+    });
+    refreshScheduleSelection();
+  }
+  if (event.target.matches('#selectable-schedules-form input[name="schedule_ids"]')) refreshScheduleSelection();
 });
 
 document.addEventListener("submit", (event) => {
@@ -103,3 +124,4 @@ window.addEventListener("pageshow", hideWaitState);
 refreshStepNumbers();
 refreshGoalFields();
 refreshLLMFields();
+refreshScheduleSelection();
