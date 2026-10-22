@@ -25,23 +25,33 @@
       <form method="post" action="{{ url_for('inspect_workout_library') }}" data-loading-message="Loading the workout library…" data-loading-detail="Reading running workout templates without making changes."><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button primary">Load running workout library</button></form>
     {% else %}
       {% set workout_count = library_preview.summary.selectable_workout_templates %}
+      {% set managed_count = library_preview.summary.garmin_managed_workout_templates|default(0) %}
       {% if workout_count %}
         <form class="form-stack" id="selectable-workouts-form" method="post" action="{{ url_for('delete_selected_workouts') }}" data-loading-message="Deleting selected workout templates…" data-loading-detail="Only the checked workout-library rows are being deleted. Completed activities remain untouched.">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <label class="consent select-all-control"><input type="checkbox" id="select-all-workouts"><span><strong>Select all {{ workout_count }} running workout templates</strong><small>You can clear individual entries below before deleting.</small></span></label>
           <div class="selectable-schedule-list">
             {% for item in library_preview.workouts %}
+              {% if item.action == 'delete' %}
               <label class="selectable-schedule selectable-workout">
                 <input type="checkbox" name="workout_ids" value="{{ item.workout_id }}">
                 <span class="workout-id">#{{ item.workout_id }}</span>
                 <span><strong>{{ item.name }}</strong><small>{{ 'Created through the official Training API' if item.source == 'official' else 'Garmin Connect workout library' }}</small></span>
                 <span class="status-pill {{ 'safe' if item.source == 'official' else '' }}">{{ 'Official' if item.source == 'official' else 'Legacy' }}</span>
               </label>
+              {% endif %}
             {% endfor %}
           </div>
           <button class="button danger" id="delete-selected-workouts" disabled>Delete selected workout templates</button>
         </form>
-      {% else %}
+      {% endif %}
+      {% if managed_count %}
+        <div class="approval-box vertical">
+          <div><strong>{{ managed_count }} Garmin-managed workout template{{ '' if managed_count == 1 else 's' }}</strong><p class="muted">Garmin returned these through its API but refuses direct deletion because they belong to an adaptive training plan. They are excluded from retries; manage the owning plan in Garmin Connect if it is still visible there.</p></div>
+          <div class="conflict-list">{% for item in library_preview.workouts if item.action == 'managed' %}<div><strong>{{ item.name }}</strong><span>Garmin ATP managed</span></div>{% endfor %}</div>
+        </div>
+      {% endif %}
+      {% if not workout_count and not managed_count %}
         <p class="muted">No running workout templates were found in Garmin Connect.</p>
       {% endif %}
     {% endif %}

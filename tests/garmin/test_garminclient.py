@@ -1,10 +1,12 @@
 from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
+from garminconnect import GarminConnectConnectionError
 
 from garminworkouts.garmin.garminclient import (
     GarminAuthenticationError,
     GarminClient,
+    GarminManagedWorkoutError,
     GarminMFARequiredError,
     GarminTokenPersistenceError,
 )
@@ -242,6 +244,16 @@ def test_workout_operations_delegate_to_current_api():
     client.session.schedule_workout.assert_called_once_with(7, "2026-08-11")
     client.session.unschedule_workout.assert_called_once_with(17)
     client.session.get_scheduled_workouts.assert_called_once_with(2026, 8)
+
+
+def test_delete_workout_identifies_garmin_adaptive_plan_protection():
+    client = _client_with_session()
+    client.session.delete_workout.side_effect = GarminConnectConnectionError(
+        "API Error 400 - Deleting workout with ATP plan id is not possible"
+    )
+
+    with pytest.raises(GarminManagedWorkoutError, match="adaptive training plan"):
+        client.delete_workout(7)
 
 
 def test_download_workout_writes_bytes():

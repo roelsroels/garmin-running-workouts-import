@@ -171,6 +171,9 @@ created through this application's official Training API connection are deleted 
 definitions only—not completed activities, their FIT evidence, or completed/missed entries in the planner's local
 training history. Bulk removal runs in small resumable batches and checkpoints every item. If Garmin times out after a
 partial deletion, retrying reconciles templates already absent remotely and continues with only the remaining IDs.
+Garmin may also return workouts owned by an adaptive training plan (ATP) that its API explicitly refuses to delete.
+The cleanup records those as Garmin-managed, excludes them from further retries, and leaves management of the owning
+plan to Garmin Connect.
 
 During goal setup, optional heart-rate guidance can be configured separately for warm-up/cooldown, easy running, long runs, quality work, and interval recovery. Choose upper BPM caps, BPM ranges, or Garmin zones. These are user-supplied watch alerts—not calculated or clinically validated zones. Garmin supports only one intensity target per step, so when quality work has both goal pace and HR guidance, the wizard asks which target should be primary.
 

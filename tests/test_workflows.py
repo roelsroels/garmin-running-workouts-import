@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from garminworkouts.activities import ActivitySummary
+from garminworkouts.garmin.garminclient import GarminManagedWorkoutError
 from garminworkouts.garmin.official_training import OfficialObjectRegistry
 from garminworkouts.state import AppState, Goal
 from garminworkouts.workflows import PlannerWorkflow
@@ -718,3 +719,30 @@ def test_workflow_workout_cleanup_reconciles_item_already_missing_remotely(tmp_p
         assert result["actions"][0]["action"] == "reconciled-missing-workout-template"
         legacy.delete_workout.assert_not_called()
         assert workflow.load_workout_library()["workouts"] == []
+
+
+def test_workflow_excludes_garmin_adaptive_plan_workout_after_delete_rejection(tmp_path, monkeypatch):
+    workout = {
+        "workoutId": 101,
+        "workoutName": "Garmin coach run",
+        "sportType": {"sportTypeId": 1, "sportTypeKey": "running"},
+    }
+    legacy = MagicMock()
+    legacy.list_workouts.return_value = [workout]
+    legacy.delete_workout.side_effect = GarminManagedWorkoutError("ATP workout")
+    legacy_context = MagicMock()
+    legacy_context.__enter__.return_value = legacy
+
+    with AppState(tmp_path / "state") as state:
+        workflow = PlannerWorkflow(state)
+        monkeypatch.setattr(workflow, "garmin_client", MagicMock(return_value=legacy_context))
+        preview = workflow.inspect_workout_library()
+
+        result = workflow.start_workout_library_deletion(preview, [101])
+        refreshed = workflow.inspect_workout_library()
+
+        assert result["status"] == "completed"
+        assert result["actions"][0]["action"] == "retained-garmin-managed-workout-template"
+        assert refreshed["summary"]["selectable_workout_templates"] == 0
+        assert refreshed["summary"]["garmin_managed_workout_templates"] == 1
+        assert refreshed["workouts"][0]["action"] == "managed"

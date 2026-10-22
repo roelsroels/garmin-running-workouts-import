@@ -843,8 +843,15 @@ def test_cleanup_bulk_deletes_selected_workout_library_templates_without_active_
                 "source": "official",
                 "action": "delete",
             },
+            {
+                "name": "Garmin coach run",
+                "workout_id": 303,
+                "source": "legacy",
+                "action": "managed",
+                "managed_reason": "Garmin adaptive training plan (ATP)",
+            },
         ],
-        "summary": {"selectable_workout_templates": 2},
+        "summary": {"selectable_workout_templates": 2, "garmin_managed_workout_templates": 1},
         "warnings": [],
     }
     monkeypatch.setattr(PlannerWorkflow, "load_workout_library", lambda _workflow: preview)
@@ -871,7 +878,10 @@ def test_cleanup_bulk_deletes_selected_workout_library_templates_without_active_
     assert b"Select all 2 running workout templates" in page.data
     assert b"Legacy missed run" in page.data
     assert b"Official run" in page.data
+    assert b"Garmin coach run" in page.data
+    assert b"Garmin ATP managed" in page.data
     assert b'name="workout_ids" value="101"' in page.data
+    assert b'name="workout_ids" value="303"' not in page.data
     assert b'id="delete-selected-workouts" disabled' in page.data
 
     response = client.post(

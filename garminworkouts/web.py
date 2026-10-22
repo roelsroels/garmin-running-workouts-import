@@ -771,11 +771,22 @@ def _workout_library_deletion_redirect(result):
     completed = len(result.get("actions", []))
     remaining = len(result.get("pending", []))
     if result.get("status") == "completed":
-        flash(
-            f"Workout-library cleanup completed: {completed} template{'s' if completed != 1 else ''} "
-            "deleted or reconciled.",
-            "success",
+        managed = sum(
+            action.get("action") == "retained-garmin-managed-workout-template" for action in result.get("actions", [])
         )
+        if managed:
+            flash(
+                f"Cleanup completed. {completed - managed} template{'s' if completed - managed != 1 else ''} "
+                f"deleted or reconciled; {managed} Garmin-managed ATP template{'s were' if managed != 1 else ' was'} "
+                "excluded because Garmin does not allow direct deletion.",
+                "warning",
+            )
+        else:
+            flash(
+                f"Workout-library cleanup completed: {completed} template{'s' if completed != 1 else ''} "
+                "deleted or reconciled.",
+                "success",
+            )
         return redirect(url_for("cleanup", library_inspected=1))
     if result.get("status") == "paused":
         flash(result.get("last_error") or "Garmin paused the deletion. Retry to continue safely.", "warning")

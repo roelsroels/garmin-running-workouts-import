@@ -7,7 +7,7 @@ from pathlib import Path
 
 from garminworkouts.activities import ActivityArchive, ActivitySummary, AssessmentSelector
 from garminworkouts.fit_analysis import FitAnalyzer
-from garminworkouts.garmin.garminclient import GarminClient
+from garminworkouts.garmin.garminclient import GarminClient, GarminManagedWorkoutError
 from garminworkouts.garmin.official_training import OfficialObjectRegistry, OfficialTrainingPublisher
 from garminworkouts.garmin.personalclient import PersonalGarminClient
 from garminworkouts.garmin.provider import CURRENT_ACTIVITY_REFRESH_CAPABILITIES, require_connection_capabilities
@@ -645,7 +645,9 @@ class PlannerWorkflow:
         selected = {str(value) for value in selected_workout_ids if str(value).strip()}
         if not selected:
             raise ValueError("Select at least one Garmin workout template to delete")
-        items_by_id = {str(item["workout_id"]): item for item in expected.get("workouts", [])}
+        items_by_id = {
+            str(item["workout_id"]): item for item in expected.get("workouts", []) if item.get("action") == "delete"
+        }
         if selected - set(items_by_id):
             raise ValueError("The selected Garmin workout templates were not part of the inspected library")
         pending = [dict(item) for item in expected["workouts"] if str(item["workout_id"]) in selected]
@@ -707,6 +709,8 @@ class PlannerWorkflow:
                         action = self._delete_legacy_workout_item(legacy_connection, legacy_items, item)
                     recent_actions.append(action)
                     job["actions"].append(action)
+                    if action["action"] == "retained-garmin-managed-workout-template":
+                        self._record_garmin_managed_workout(item)
                     job["pending"] = [value for value in job["pending"] if str(value["workout_id"]) != workout_id]
                     self._remove_cached_workout(workout_id)
                     self._write_private_json(self._workout_library_deletion_path(), job)
@@ -748,9 +752,12 @@ class PlannerWorkflow:
                 raise RuntimeError(
                     f"Garmin workout #{workout_id} changed names after inspection; deletion stopped safely"
                 )
-            connection.delete_workout(item["workout_id"])
+            try:
+                connection.delete_workout(item["workout_id"])
+                action = "deleted-selected-workout-template"
+            except GarminManagedWorkoutError:
+                action = "retained-garmin-managed-workout-template"
             current_items.pop(workout_id, None)
-            action = "deleted-selected-workout-template"
         return {"action": action, "name": item["name"], "workout_id": item["workout_id"], "source": "legacy"}
 
     @staticmethod
@@ -775,6 +782,26 @@ class PlannerWorkflow:
         preview.setdefault("summary", {})["selectable_workout_templates"] = len(preview["workouts"])
         self._write_private_json(self._workout_library_path(), preview)
 
+    def _record_garmin_managed_workout(self, item):
+        path = self._garmin_managed_workouts_path()
+        if path.exists():
+            data = self._read_json(path)
+        else:
+            data = {"version": 1, "workouts": {}}
+        data.setdefault("workouts", {})[str(item["workout_id"])] = {
+            "workout_id": item["workout_id"],
+            "name": item["name"],
+            "reason": "Garmin adaptive training plan (ATP)",
+        }
+        self._write_private_json(path, data)
+
+    def _garmin_managed_workout_ids(self):
+        path = self._garmin_managed_workouts_path()
+        if not path.exists():
+            return set()
+        data = self._read_json(path)
+        return {str(workout_id) for workout_id in data.get("workouts", {})}
+
     def _current_workout_library_preview(self):
         with self.garmin_client() as connection:
             preview = SelectableWorkoutLibraryCleanup(connection).preview()
@@ -793,11 +820,21 @@ class PlannerWorkflow:
                     },
                 )
                 item["source"] = "official"
+        managed_ids = self._garmin_managed_workout_ids()
+        for workout_id, item in items_by_id.items():
+            if workout_id in managed_ids and item.get("source") == "legacy":
+                item["action"] = "managed"
+                item["managed_reason"] = "Garmin adaptive training plan (ATP)"
         preview["workouts"] = sorted(
             items_by_id.values(),
             key=lambda item: (item["name"].casefold(), str(item["workout_id"])),
         )
-        preview["summary"]["selectable_workout_templates"] = len(preview["workouts"])
+        preview["summary"]["selectable_workout_templates"] = sum(
+            item.get("action") == "delete" for item in preview["workouts"]
+        )
+        preview["summary"]["garmin_managed_workout_templates"] = sum(
+            item.get("action") == "managed" for item in preview["workouts"]
+        )
         return preview
 
     def inspect_previous_block_templates(self):
@@ -1044,6 +1081,9 @@ class PlannerWorkflow:
 
     def _workout_library_deletion_path(self):
         return self._web_state_dir / "cleanup-workout-library-deletion.json"
+
+    def _garmin_managed_workouts_path(self):
+        return self._web_state_dir / "cleanup-garmin-managed-workouts.json"
 
     def _obsolete_cleanup_path(self, plan_id):
         return self._web_state_dir / f"cleanup-{int(plan_id)}-obsolete-templates.json"

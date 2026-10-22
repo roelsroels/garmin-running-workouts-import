@@ -1,7 +1,11 @@
 import os
 from pathlib import Path
 
-from garminconnect import GarminConnectAuthenticationError, GarminConnectTooManyRequestsError
+from garminconnect import (
+    GarminConnectAuthenticationError,
+    GarminConnectConnectionError,
+    GarminConnectTooManyRequestsError,
+)
 
 from garminworkouts.garmin.provider import LEGACY_WEB_PROVIDER
 from garminworkouts.garmin.ratelimit import GarminRateLimiter
@@ -25,6 +29,10 @@ class GarminMFARequiredError(GarminAuthenticationError):
 
 class GarminTokenPersistenceError(GarminAuthenticationError):
     """Garmin authenticated, but the resulting reusable tokens were not saved."""
+
+
+class GarminManagedWorkoutError(RuntimeError):
+    """Garmin owns the workout through a training plan and rejects direct deletion."""
 
 
 class GarminClient:
@@ -139,7 +147,14 @@ class GarminClient:
         return self._request(self.session.update_workout, workout_id, workout)
 
     def delete_workout(self, workout_id):
-        return self._request(self.session.delete_workout, workout_id)
+        try:
+            return self._request(self.session.delete_workout, workout_id)
+        except GarminConnectConnectionError as exc:
+            if _is_managed_workout_deletion(exc):
+                raise GarminManagedWorkoutError(
+                    "Garmin manages this workout through an adaptive training plan; direct deletion is not allowed"
+                ) from exc
+            raise
 
     def schedule_workout(self, workout_id, date):
         return self._request(self.session.schedule_workout, workout_id, date)
@@ -239,3 +254,8 @@ def _is_rate_limited(error):
         return True
     message = str(error).casefold()
     return "429" in message or "too many" in message or "rate limit" in message
+
+
+def _is_managed_workout_deletion(error):
+    message = str(error).casefold()
+    return "400" in message and "deleting workout with atp plan id is not possible" in message
