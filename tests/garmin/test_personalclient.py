@@ -63,9 +63,11 @@ def test_personal_client_mints_token_lists_activities_and_uses_bearer_header(tmp
     activity_request = opener.open.call_args_list[1].args[0]
     assert token_request.full_url == f"{BASE_URL}{TOKEN_PATH}"
     assert token_request.method == "POST"
+    assert token_request.get_header("Accept") == "application/json"
     assert token_request.get_header("Authorization") == "ApiKey personal-secret-key"
     assert activity_request.full_url.startswith(f"{BASE_URL}{ACTIVITY_SEARCH_PATH}?")
     assert "activityType=running" in activity_request.full_url
+    assert activity_request.get_header("Accept") == "application/json"
     assert activity_request.get_header("Authorization") == "Bearer official-token"
     assert limiter.before_request.call_count == 2
     assert limiter.record_success.call_count == 2
@@ -116,6 +118,7 @@ def test_personal_client_paginates_date_search_and_downloads_original_zip(tmp_pa
     assert opener.open.call_args_list[3].args[0].full_url == (
         f"{BASE_URL}{ACTIVITY_DOWNLOAD_PATH.format(activity_id='100')}"
     )
+    assert opener.open.call_args_list[3].args[0].get_header("Accept") == "application/x-zip-compressed"
 
 
 def test_personal_client_sanitizes_authentication_failure(tmp_path):

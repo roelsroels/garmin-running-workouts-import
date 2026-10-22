@@ -160,24 +160,24 @@ class PersonalGarminClient:
             raise GarminPersonalAPIError("Garmin returned an invalid JSON response") from exc
 
     def _request_bytes(self, path):
-        payload, _headers = self._authorized_request(path)
+        payload, _headers = self._authorized_request(path, accept="application/x-zip-compressed")
         return payload
 
-    def _authorized_request(self, path):
+    def _authorized_request(self, path, accept="application/json"):
         self._ensure_access_token()
         try:
-            return self._request(path, authorization=f"Bearer {self._access_token}")
+            return self._request(path, authorization=f"Bearer {self._access_token}", accept=accept)
         except GarminPersonalAuthenticationError:
             # A cached token may have been revoked early. Mint once and replay once.
             self._delete_cached_token()
             self._mint_access_token()
-            return self._request(path, authorization=f"Bearer {self._access_token}")
+            return self._request(path, authorization=f"Bearer {self._access_token}", accept=accept)
 
-    def _request(self, path, method="GET", authorization=None):
+    def _request(self, path, method="GET", authorization=None, accept="application/json"):
         if not path.startswith("/"):
             raise ValueError("Garmin Personal API paths must be absolute")
         url = f"{BASE_URL}{path}"
-        headers = {"Accept": "application/json, application/x-zip-compressed"}
+        headers = {"Accept": accept}
         if authorization:
             headers["Authorization"] = authorization
         request = urllib.request.Request(url, headers=headers, method=method)
