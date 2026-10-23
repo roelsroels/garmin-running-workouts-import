@@ -1,6 +1,7 @@
 import json
 import os
 import secrets
+import time
 from contextlib import ExitStack
 from datetime import date, timedelta
 from pathlib import Path
@@ -160,6 +161,49 @@ class PlannerWorkflow:
 
     def begin_starter_authorization(self):
         return self.starter_client().authorization()
+
+    def begin_cli_starter_authorization(self):
+        """Create an OAuth request that the configured web callback can finish.
+
+        A terminal cannot receive an HTTPS callback itself. The short-lived PKCE
+        verifier is therefore handed to the same protected web application via a
+        private file in the shared data directory. The callback consumes it once.
+        """
+        authorization = self.begin_starter_authorization()
+        self._write_private_json(
+            self._cli_starter_authorization_path(),
+            {
+                "version": 1,
+                "state": authorization.state,
+                "code_verifier": authorization.code_verifier,
+                "created_at": time.time(),
+            },
+        )
+        return authorization
+
+    def complete_cli_starter_authorization(self, state, code, maximum_age_seconds=600):
+        path = self._cli_starter_authorization_path()
+        try:
+            pending = self._read_json(path)
+        except ValueError as exc:
+            raise ValueError("The terminal Garmin authorization state was missing or invalid") from exc
+        if not pending or not secrets.compare_digest(str(pending.get("state", "")), str(state or "")):
+            raise ValueError("The terminal Garmin authorization state was missing or invalid")
+        try:
+            age = time.time() - float(pending.get("created_at", 0))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("The terminal Garmin authorization request was invalid") from exc
+        if age < 0 or age > maximum_age_seconds:
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+            raise ValueError("The terminal Garmin authorization request expired; start it again")
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+        return self.complete_starter_authorization(code, pending["code_verifier"])
 
     def complete_starter_authorization(self, code, code_verifier):
         client = self.starter_client()
@@ -1078,6 +1122,9 @@ class PlannerWorkflow:
 
     def _workout_library_path(self):
         return self._web_state_dir / "cleanup-workout-library.json"
+
+    def _cli_starter_authorization_path(self):
+        return self._web_state_dir / "cli-starter-authorization.json"
 
     def _workout_library_deletion_path(self):
         return self._web_state_dir / "cleanup-workout-library-deletion.json"

@@ -191,6 +191,26 @@ def test_web_starter_oauth_rejects_callback_state_mismatch(tmp_path, monkeypatch
         assert "garmin_starter_oauth_state" not in browser_session
 
 
+def test_web_starter_callback_can_finish_cli_authorization_without_browser_session(tmp_path, monkeypatch):
+    completed = []
+
+    def complete(_workflow, state, code):
+        completed.append((state, code))
+        return {"user_id": "runner-id", "permissions": ("WORKOUT_IMPORT",)}
+
+    monkeypatch.setattr(PlannerWorkflow, "complete_cli_starter_authorization", complete)
+    client = _app(tmp_path).test_client()
+
+    response = client.get(
+        "/settings/garmin/starter/callback?state=terminal-state&code=authorization-code",
+        follow_redirects=True,
+    )
+
+    assert response.status_code == 200
+    assert b"official Garmin API connection succeeded" in response.data
+    assert completed == [("terminal-state", "authorization-code")]
+
+
 def test_web_garmin_mfa_is_browser_scoped_and_completes_without_storing_secrets(tmp_path, monkeypatch):
     connection = MagicMock()
     monkeypatch.setattr(PlannerWorkflow, "begin_garmin_login", lambda *_args: connection)

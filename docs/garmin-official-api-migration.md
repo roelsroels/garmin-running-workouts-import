@@ -1,6 +1,6 @@
 # Garmin's 2026 Connect Developer Program: project impact and migration plan
 
-Assessment date: **21 October 2026**
+Assessment updated: **22 October 2026**
 
 Garmin has reopened and reorganized the Garmin Connect Developer Program. This is good news for this project: there is
 now a supported route for both activity ingestion and structured-workout publishing. It is **not** an immediate breaking
@@ -129,6 +129,11 @@ user-bound registry of the remote workout and schedule IDs created by the applic
 idempotently, resolves schedule IDs, previews replacement conflicts, and limits deletion to registry-owned objects.
 The protected Settings page enables the official publisher only after OAuth is connected and `WORKOUT_IMPORT` is
 present. Legacy publishing remains the default and fallback.
+
+The interactive and scriptable CLI now uses the same provider-aware workflow. It can inspect provider status, initiate
+Starter authorization through the configured HTTPS web callback, select either publisher, and perform the same
+preview-first schedule/template cleanup as the web interface. The terminal-to-web OAuth handoff keeps the PKCE
+verifier in a private, single-use file for at most ten minutes.
 
 ## Remaining development-environment validation
 

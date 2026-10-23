@@ -224,6 +224,128 @@ def command_app_adapt(args):
     _with_interactive_app(args, lambda app: app.adapt())
 
 
+def _with_workflow(args, action):
+    from garminworkouts.workflows import PlannerWorkflow
+
+    with AppState(args.data_dir) as state:
+        return action(PlannerWorkflow(state))
+
+
+def command_provider_status(args):
+    def status(workflow):
+        permissions = sorted(workflow._starter_permissions())  # noqa: SLF001 - CLI status is an application client.
+        return {
+            "activity_provider": workflow.activity_provider_key(),
+            "personal_api_configured": workflow.personal_api_configured(),
+            "training_provider": workflow.training_provider_key(),
+            "starter_api_configured": workflow.starter_api_configured(),
+            "starter_connected": workflow.starter_connected(),
+            "starter_permissions": permissions,
+        }
+
+    print(json.dumps(_with_workflow(args, status), indent=2))
+
+
+def command_provider_activity(args):
+    _with_workflow(args, lambda workflow: workflow.select_activity_provider(args.provider, test=not args.no_test))
+    print(json.dumps({"activity_provider": args.provider, "tested": not args.no_test}, indent=2))
+
+
+def command_provider_training(args):
+    _with_workflow(args, lambda workflow: workflow.select_training_provider(args.provider))
+    print(json.dumps({"training_provider": args.provider}, indent=2))
+
+
+def command_provider_starter_connect(args):
+    authorization = _with_workflow(args, lambda workflow: workflow.begin_cli_starter_authorization())
+    print(
+        json.dumps(
+            {
+                "authorization_url": authorization.url,
+                "next_step": (
+                    "Open authorization_url in a browser. The configured HTTPS planner callback completes the "
+                    "exchange; then run 'providers status'."
+                ),
+                "expires_in_seconds": 600,
+            },
+            indent=2,
+        )
+    )
+
+
+def command_provider_starter_disconnect(args):
+    if not args.apply:
+        print(json.dumps({"mode": "preview", "action": "disconnect official Starter API"}, indent=2))
+        return
+    _with_workflow(args, lambda workflow: workflow.disconnect_starter())
+    print(json.dumps({"mode": "applied", "starter_connected": False, "training_provider": "legacy"}, indent=2))
+
+
+def _selected_ids(items, key, requested, select_all):
+    selectable = [item for item in items if item.get("action") in {"delete", "unschedule"}]
+    valid = {str(item[key]) for item in selectable}
+    if select_all:
+        return sorted(valid)
+    selected = {str(value) for value in requested}
+    unknown = selected - valid
+    if unknown:
+        raise ValueError("Unknown or non-selectable IDs: " + ", ".join(sorted(unknown)))
+    if not selected:
+        raise ValueError("Use --all or repeat --id for every item to apply")
+    return sorted(selected)
+
+
+def command_cleanup_workouts(args):
+    def run(workflow):
+        if args.resume:
+            result = workflow.continue_workout_library_deletion(batch_size=args.batch_size)
+        else:
+            preview = workflow.inspect_workout_library()
+            if not args.apply:
+                return {"mode": "preview", **preview}
+            selected = _selected_ids(preview["workouts"], "workout_id", args.id, args.all)
+            result = workflow.start_workout_library_deletion(preview, selected)
+        while args.until_complete and result["status"] == "running":
+            result = workflow.continue_workout_library_deletion(batch_size=args.batch_size)
+        return {"mode": "applied", **result}
+
+    print(json.dumps(_with_workflow(args, run), indent=2))
+
+
+def command_cleanup_schedules(args):
+    def run(workflow):
+        record, preview = workflow.inspect_selectable_schedules()
+        if not args.apply:
+            return {"mode": "preview", **preview}
+        selected = _selected_ids(preview["calendar"], "scheduled_workout_id", args.id, args.all)
+        actions = workflow.remove_selected_schedules(record, preview, selected)
+        return {"mode": "applied", "actions": actions}
+
+    print(json.dumps(_with_workflow(args, run), indent=2))
+
+
+def command_cleanup_overlaps(args):
+    def run(workflow):
+        record, preview = workflow.inspect_active_conflicts()
+        if not args.apply:
+            return {"mode": "preview", **preview}
+        actions = workflow.clean_active_conflicts(record, preview, delete_templates=args.delete_templates)
+        return {"mode": "applied", "actions": actions}
+
+    print(json.dumps(_with_workflow(args, run), indent=2))
+
+
+def command_cleanup_previous_block(args):
+    def run(workflow):
+        record, previous, preview = workflow.inspect_previous_block_templates()
+        if not args.apply:
+            return {"mode": "preview", "previous_plan_id": previous.id, **preview}
+        actions = workflow.clean_previous_block_templates(record, preview)
+        return {"mode": "applied", "previous_plan_id": previous.id, "actions": actions}
+
+    print(json.dumps(_with_workflow(args, run), indent=2))
+
+
 def command_web(args):
     from garminworkouts.web import create_app
 
@@ -510,6 +632,78 @@ def main():
     parser_adapt = subparsers.add_parser("adapt", description="Assess and propose changes to remaining scheduled days")
     parser_adapt.set_defaults(func=command_app_adapt)
 
+    parser_providers = subparsers.add_parser(
+        "providers", description="Inspect or select Garmin activity and workout API providers"
+    )
+    provider_subparsers = parser_providers.add_subparsers(title="Provider commands", required=True)
+    parser_provider_status = provider_subparsers.add_parser("status", description="Show configured Garmin providers")
+    parser_provider_status.set_defaults(func=command_provider_status)
+    parser_provider_activity = provider_subparsers.add_parser(
+        "activity", description="Select the completed-activity and FIT source"
+    )
+    parser_provider_activity.add_argument("provider", choices=("legacy", "personal"))
+    parser_provider_activity.add_argument(
+        "--no-test", action="store_true", help="Save without making a live provider request"
+    )
+    parser_provider_activity.set_defaults(func=command_provider_activity)
+    parser_provider_training = provider_subparsers.add_parser(
+        "training", description="Select the workout and calendar publisher"
+    )
+    parser_provider_training.add_argument("provider", choices=("legacy", "starter"))
+    parser_provider_training.set_defaults(func=command_provider_training)
+    parser_provider_starter_connect = provider_subparsers.add_parser(
+        "starter-connect", description="Begin official Garmin OAuth through the configured HTTPS web callback"
+    )
+    parser_provider_starter_connect.set_defaults(func=command_provider_starter_connect)
+    parser_provider_starter_disconnect = provider_subparsers.add_parser(
+        "starter-disconnect", description="Preview or disconnect the official Garmin API account"
+    )
+    parser_provider_starter_disconnect.add_argument(
+        "--apply", action="store_true", help="Disconnect; preview is the safe default"
+    )
+    parser_provider_starter_disconnect.set_defaults(func=command_provider_starter_disconnect)
+
+    parser_cleanup = subparsers.add_parser(
+        "cleanup", description="Preview or remove selected Garmin schedules and workout templates"
+    )
+    cleanup_subparsers = parser_cleanup.add_subparsers(title="Cleanup commands", required=True)
+    parser_cleanup_workouts = cleanup_subparsers.add_parser(
+        "workouts", description="Inspect or delete selected running workout-library templates"
+    )
+    parser_cleanup_workouts.add_argument("--apply", action="store_true", help="Delete selected templates")
+    parser_cleanup_workouts.add_argument("--all", action="store_true", help="Select every removable template")
+    parser_cleanup_workouts.add_argument("--id", action="append", default=[], help="Workout ID; repeatable")
+    parser_cleanup_workouts.add_argument(
+        "--resume", action="store_true", help="Continue a previously checkpointed deletion"
+    )
+    parser_cleanup_workouts.add_argument(
+        "--batch-size", type=int, default=1, help="Delete 1–10 templates per checkpointed request"
+    )
+    parser_cleanup_workouts.add_argument(
+        "--until-complete", action="store_true", help="Continue batches until complete or Garmin pauses the job"
+    )
+    parser_cleanup_workouts.set_defaults(func=command_cleanup_workouts)
+    parser_cleanup_schedules = cleanup_subparsers.add_parser(
+        "schedules", description="Inspect or unschedule selected entries from the active plan"
+    )
+    parser_cleanup_schedules.add_argument("--apply", action="store_true", help="Unschedule selected entries")
+    parser_cleanup_schedules.add_argument("--all", action="store_true", help="Select every removable entry")
+    parser_cleanup_schedules.add_argument("--id", action="append", default=[], help="Schedule ID; repeatable")
+    parser_cleanup_schedules.set_defaults(func=command_cleanup_schedules)
+    parser_cleanup_overlaps = cleanup_subparsers.add_parser(
+        "overlaps", description="Inspect or remove schedule conflicts against the active plan"
+    )
+    parser_cleanup_overlaps.add_argument("--apply", action="store_true", help="Remove previewed conflicts")
+    parser_cleanup_overlaps.add_argument(
+        "--delete-templates", action="store_true", help="Also remove reviewed obsolete templates"
+    )
+    parser_cleanup_overlaps.set_defaults(func=command_cleanup_overlaps)
+    parser_cleanup_previous = cleanup_subparsers.add_parser(
+        "previous-block", description="Inspect or remove obsolete templates from the previous finished block"
+    )
+    parser_cleanup_previous.add_argument("--apply", action="store_true", help="Delete previewed obsolete templates")
+    parser_cleanup_previous.set_defaults(func=command_cleanup_previous_block)
+
     parser_web = subparsers.add_parser("web", description="Run the local web application server")
     parser_web.add_argument("--host", default="127.0.0.1", help="Listen address; keep loopback behind nginx")
     parser_web.add_argument("--port", type=int, default=8765, help="Listen port")
@@ -536,6 +730,8 @@ def main():
     except GarminRateLimitError as exc:
         parser.exit(2, f"{exc}\n")
     except GarminAuthenticationError as exc:
+        parser.exit(2, f"{exc}\n")
+    except (RuntimeError, ValueError) as exc:
         parser.exit(2, f"{exc}\n")
 
 

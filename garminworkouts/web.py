@@ -602,19 +602,20 @@ def create_app(config=None):
     def complete_starter():
         expected_state = session.pop("garmin_starter_oauth_state", None)
         returned_state = request.args.get("state", "")
-        if not expected_state or not secrets.compare_digest(expected_state, returned_state):
-            pending_starter_authorizations.remove(expected_state)
-            raise ValueError("The Garmin authorization state was missing or invalid; start the connection again")
-        code_verifier = pending_starter_authorizations.take(returned_state)
-        if not code_verifier:
-            raise ValueError("The Garmin authorization request expired; start the connection again")
         if request.args.get("error"):
             raise ValueError("Garmin authorization was declined or could not be completed")
         with _state(app) as state:
-            status = PlannerWorkflow(state).complete_starter_authorization(
-                request.args.get("code"),
-                code_verifier,
-            )
+            workflow = PlannerWorkflow(state)
+            if expected_state and secrets.compare_digest(expected_state, returned_state):
+                code_verifier = pending_starter_authorizations.take(returned_state)
+                if not code_verifier:
+                    raise ValueError("The Garmin authorization request expired; start the connection again")
+                status = workflow.complete_starter_authorization(request.args.get("code"), code_verifier)
+            elif expected_state:
+                pending_starter_authorizations.remove(expected_state)
+                raise ValueError("The Garmin authorization state was missing or invalid; start the connection again")
+            else:
+                status = workflow.complete_cli_starter_authorization(returned_state, request.args.get("code"))
         permission_note = (
             " Workout import permission is active."
             if "WORKOUT_IMPORT" in status["permissions"]

@@ -15,11 +15,11 @@ from garminworkouts.garmin.ratelimit import (
 from garminworkouts.llm import LLMConfig, create_advisor
 from garminworkouts.models.heart_rate import HeartRateRange, validate_heart_rate_zone
 from garminworkouts.models.training_plan import TrainingPlan
-from garminworkouts.plan import PlanApplier
 from garminworkouts.planner import DeterministicPlanner, write_plan
-from garminworkouts.replanning import calendar_changes, immutable_workout_keys, validate_mutable_replacement
-from garminworkouts.retire import PlanRetirement, ScheduledConflictCleanup, combined_training_plan
+from garminworkouts.replanning import calendar_changes
+from garminworkouts.retire import ScheduledConflictCleanup
 from garminworkouts.state import Goal
+from garminworkouts.workflows import PlannerWorkflow
 
 WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 HEART_RATE_PHASES = (
@@ -73,6 +73,9 @@ class InteractiveApp:
         self.planner = DeterministicPlanner()
         self._llm_session_key = None
 
+    def _workflow(self):
+        return PlannerWorkflow(self.state, today=self.today)
+
     def run(self):
         self.console.write("Garmin Running Planner")
         self.console.write("======================")
@@ -102,7 +105,7 @@ class InteractiveApp:
                 ),
                 "Change the goal or availability",
                 "View the complete planned calendar",
-                "Review and clean Garmin schedule overlaps",
+                "Clean Garmin schedules and workout templates",
                 "Create a one-off heart-rate workout",
                 "Garmin connection and optional LLM settings",
                 "Exit",
@@ -123,7 +126,7 @@ class InteractiveApp:
                 elif choice == 4:
                     self.show_calendar()
                 elif choice == 5:
-                    self.clean_schedule_overlaps()
+                    self.cleanup()
                 elif choice == 6:
                     self.create_heart_rate_workout()
                 elif choice == 7:
@@ -408,8 +411,9 @@ class InteractiveApp:
         choice = self.console.choose(
             "Settings",
             [
-                "Update or reconnect Garmin workout publishing",
+                "Update or reconnect legacy Garmin Connect",
                 "Configure Garmin activity source",
+                "Configure official Garmin API and workout publisher",
                 "Configure optional LLM",
                 "Return",
             ],
@@ -419,7 +423,60 @@ class InteractiveApp:
         elif choice == 2:
             self.configure_activity_source()
         elif choice == 3:
+            self.configure_official_garmin()
+        elif choice == 4:
             self.configure_llm()
+
+    def configure_official_garmin(self):
+        workflow = self._workflow()
+        connected = workflow.starter_connected()
+        publisher = workflow.training_provider_key()
+        self.console.write(
+            f"Official Garmin API: {'connected' if connected else 'not connected'} · "
+            f"workout publisher: {'official Starter API' if publisher == 'starter' else 'legacy Connect session'}"
+        )
+        options = ["Connect or reconnect official Garmin API"]
+        if connected:
+            options.extend(
+                [
+                    "Use official Starter API for workouts and calendar",
+                    "Use legacy Connect session for workouts and calendar",
+                    "Disconnect official Garmin API",
+                ]
+            )
+        options.append("Return")
+        choice = self.console.choose("Official Garmin API", options)
+        if choice == len(options):
+            return
+        if choice == 1:
+            authorization = workflow.begin_cli_starter_authorization()
+            self.console.write("Open this address in a browser and approve Garmin access:")
+            self.console.write(authorization.url)
+            self.console.write(
+                "The configured HTTPS web callback completes the exchange. Return here after the browser reports "
+                "that Garmin is connected."
+            )
+            self.console.ask("Press Enter after completing authorization", "done")
+            if not workflow.starter_connected():
+                raise ValueError(
+                    "The official Garmin connection is not complete. Keep the web service running, then retry."
+                )
+            status = workflow.starter_client().connection_status()
+            self.console.write("Official Garmin API connected with permissions: " + ", ".join(status["permissions"]))
+            return
+        if choice == 2:
+            workflow.select_training_provider("starter")
+            self.console.write("The official Starter API is now the workout and calendar publisher.")
+        elif choice == 3:
+            workflow.select_training_provider("legacy")
+            self.console.write("The legacy Connect session is now the workout and calendar publisher.")
+        elif choice == 4:
+            if not self.console.confirm(
+                "Disconnect the official Garmin API? Existing Garmin workouts are not deleted.", default=False
+            ):
+                return
+            workflow.disconnect_starter()
+            self.console.write("The official Garmin API connection was removed.")
 
     def configure_activity_source(self):
         current = self._activity_provider_key()
@@ -448,36 +505,150 @@ class InteractiveApp:
         label = "official Personal API" if provider == "personal" else "legacy Connect session"
         self.console.write(f"Activity source changed to the {label} and tested successfully.")
 
+    def cleanup(self):
+        choice = self.console.choose(
+            "Garmin cleanup",
+            [
+                "Remove selected planned calendar entries",
+                "Delete selected running workout templates",
+                "Review and clean schedule overlaps",
+                "Remove obsolete templates from the previous finished block",
+                "Return",
+            ],
+        )
+        if choice == 1:
+            return self.remove_selected_schedules()
+        if choice == 2:
+            return self.delete_selected_workouts()
+        if choice == 3:
+            return self.clean_schedule_overlaps()
+        if choice == 4:
+            return self.clean_previous_block_templates()
+        return None
+
+    def remove_selected_schedules(self):
+        workflow = self._workflow()
+        record, preview = workflow.inspect_selectable_schedules()
+        selectable = [item for item in preview["calendar"] if item.get("action") == "unschedule"]
+        if not selectable:
+            self.console.write("No removable Garmin calendar entries match the active training block.")
+            return []
+        self.console.write("Removable Garmin calendar entries")
+        for item in selectable:
+            timing = "past / missed" if item.get("timing") == "past" else item.get("timing", "scheduled")
+            self.console.write(f"  {item['scheduled_workout_id']}  {item['date']}  {item['name']}  {timing}")
+        selected = self._select_ids(
+            "Schedule IDs to remove (comma-separated or 'all'; blank cancels)",
+            selectable,
+            "scheduled_workout_id",
+        )
+        if not selected:
+            self.console.write("No Garmin changes were made.")
+            return []
+        if not self.console.confirm(
+            f"Remove {len(selected)} selected calendar entr{'y' if len(selected) == 1 else 'ies'}?",
+            default=False,
+        ):
+            self.console.write("No Garmin changes were made.")
+            return []
+        actions = workflow.remove_selected_schedules(record, preview, selected)
+        self.console.write(f"Removed {len(actions)} Garmin calendar entr{'y' if len(actions) == 1 else 'ies'}.")
+        return actions
+
+    def delete_selected_workouts(self):
+        workflow = self._workflow()
+        pending = workflow.load_workout_library_deletion()
+        if pending:
+            if not self.console.confirm(
+                f"Continue the saved deletion with {len(pending['pending'])} template(s) remaining?", default=True
+            ):
+                return pending
+            result = workflow.continue_workout_library_deletion()
+            return self._finish_workout_deletion(workflow, result)
+
+        preview = workflow.inspect_workout_library()
+        selectable = [item for item in preview["workouts"] if item.get("action") == "delete"]
+        managed = [item for item in preview["workouts"] if item.get("action") == "managed"]
+        if managed:
+            self.console.write(
+                f"{len(managed)} Garmin adaptive-plan template(s) cannot be deleted directly and were excluded."
+            )
+        if not selectable:
+            self.console.write("No removable running workout templates were found.")
+            return []
+        self.console.write("Removable running workout templates")
+        for item in selectable:
+            self.console.write(f"  {item['workout_id']}  {item['name']}  {item.get('source', 'legacy')}")
+        selected = self._select_ids(
+            "Workout IDs to delete (comma-separated or 'all'; blank cancels)", selectable, "workout_id"
+        )
+        if not selected or not self.console.confirm(
+            f"Delete {len(selected)} selected workout template(s)? Completed activities remain untouched.",
+            default=False,
+        ):
+            self.console.write("No Garmin changes were made.")
+            return []
+        result = workflow.start_workout_library_deletion(preview, selected)
+        return self._finish_workout_deletion(workflow, result)
+
+    def _finish_workout_deletion(self, workflow, result):
+        while result["status"] == "running":
+            result = workflow.continue_workout_library_deletion()
+        if result["status"] == "paused":
+            self.console.write(result["last_error"])
+            self.console.write("Run cleanup again to continue from the saved checkpoint.")
+            return result
+        deleted = sum(item["action"] == "deleted-selected-workout-template" for item in result["actions"])
+        managed = sum(item["action"] == "retained-garmin-managed-workout-template" for item in result["actions"])
+        self.console.write(f"Workout cleanup finished: {deleted} deleted, {managed} Garmin-managed and retained.")
+        return result
+
+    def clean_previous_block_templates(self):
+        workflow = self._workflow()
+        record, previous, preview = workflow.inspect_previous_block_templates()
+        count = preview["summary"]["workout_templates_to_delete"]
+        if not count:
+            self.console.write("No obsolete templates from the previous finished block need removal.")
+            return []
+        self.console.write(
+            f"Previous block {previous.start_date:%d %b} – {previous.end_date:%d %b %Y}: {count} obsolete template(s)"
+        )
+        for item in preview["workouts"]:
+            if item.get("action") == "delete":
+                self.console.write(f"  {item['name']}")
+        if not self.console.confirm("Delete these reviewed obsolete templates?", default=False):
+            return []
+        actions = workflow.clean_previous_block_templates(record, preview)
+        self.console.write(f"Removed {len(actions)} obsolete Garmin item(s).")
+        return actions
+
+    def _select_ids(self, prompt, items, key):
+        valid = {str(item[key]) for item in items}
+        answer = str(self.console.ask(prompt, "") or "").strip()
+        if not answer:
+            return []
+        if answer.casefold() == "all":
+            return sorted(valid)
+        selected = {value.strip() for value in answer.split(",") if value.strip()}
+        unknown = selected - valid
+        if unknown:
+            raise ValueError("Unknown selection: " + ", ".join(sorted(unknown)))
+        return sorted(selected)
+
     def clean_schedule_overlaps(self):
-        active_record = self.state.active_plan()
-        if not active_record:
+        if not self.state.active_plan():
             self.console.write("There is no active local plan to protect during cleanup.")
             return []
-
-        active_plan = TrainingPlan(active_record.config)
-        with self._garmin_client() as connection:
-            decision = self._review_schedule_conflicts(
-                active_plan,
-                connection,
-                replacement_pending=False,
-            )
-            if decision["conflict_count"] == 0:
-                self.console.write("No overlapping Garmin schedule entries were found.")
-                return []
-            if not decision["proceed"]:
-                self.console.write("The Garmin schedule was left unchanged.")
-                return []
-            actions = decision["cleanup"].apply(
-                decision["preview"],
-                delete_templates=decision["delete_templates"],
-            )
-
-        self.state.record_event(
-            "schedule-overlaps-cleaned",
-            {
-                "active_plan_id": active_record.id,
-                "actions": actions,
-            },
+        workflow = self._workflow()
+        record, preview = workflow.inspect_active_conflicts()
+        decision = self._review_conflict_preview(preview, replacement_pending=False)
+        if not decision["proceed"]:
+            self.console.write("The Garmin schedule was left unchanged.")
+            return []
+        actions = workflow.clean_active_conflicts(
+            record,
+            preview,
+            delete_templates=decision["delete_templates"],
         )
         self.console.write("The overlapping Garmin schedule entries were removed.")
         return actions
@@ -534,7 +705,7 @@ class InteractiveApp:
                 }
             ],
         }
-        plan = TrainingPlan(config)
+        TrainingPlan(config)
         self.console.write("Proposed one-off workout")
         self.console.write(f"  {workout_date.isoformat()}  {name}  {description}")
         for index, step in enumerate(steps, 1):
@@ -544,26 +715,19 @@ class InteractiveApp:
             self.console.write("No Garmin changes were made.")
             return None
 
-        with self._garmin_client() as connection:
-            decision = self._review_schedule_conflicts(plan, connection)
-            if not decision["proceed"]:
-                self.console.write("No Garmin changes were made.")
-                return None
-            apply_actions = PlanApplier(plan, connection).apply(schedule=True)
-            cleanup_actions = []
-            if decision["cleanup"] is not None:
-                cleanup_actions = decision["cleanup"].apply(
-                    decision["preview"],
-                    delete_templates=decision["delete_templates"],
-                )
-        self.state.record_event(
-            "one-off-heart-rate-workout-applied",
-            {
-                "date": workout_date.isoformat(),
-                "name": name,
-                "apply_actions": apply_actions,
-                "conflict_cleanup_actions": cleanup_actions,
-            },
+        workflow = self._workflow()
+        draft_id = workflow.save_one_off_draft(config)
+        preview = workflow.inspect_one_off_conflicts(draft_id)
+        decision = self._review_conflict_preview(preview)
+        if not decision["proceed"]:
+            self.console.write("No Garmin changes were made.")
+            return None
+        workflow.apply_one_off(
+            draft_id,
+            preview,
+            remove_conflicts=decision["remove_conflicts"],
+            delete_templates=decision["delete_templates"],
+            allow_duplicates=decision["allow_duplicates"],
         )
         self.console.write("The one-off heart-rate workout was scheduled successfully.")
         return config
@@ -859,81 +1023,87 @@ class InteractiveApp:
             self.console.write("Garmin refresh was unavailable; showing the most recently stored progress.")
 
     def _apply_replacement(self, new_record, old_record=None):
-        validate_mutable_replacement(
-            old_record.config if old_record else {"workouts": []},
-            new_record.config,
-            today=self.today,
-            progress=self.state.progress(old_record.id) if old_record else None,
-        )
-        new_plan = TrainingPlan(new_record.config)
-        changes_started = False
+        workflow = self._workflow()
         try:
-            with self._garmin_client() as connection:
-                conflict_decision = self._review_schedule_conflicts(new_plan, connection)
-                if not conflict_decision["proceed"]:
-                    self.console.write("No Garmin changes were made; the proposal remains saved locally.")
-                    return False
-                changes_started = True
-                actions = PlanApplier(new_plan, connection).apply(schedule=True)
-                conflict_actions = []
-                if conflict_decision["cleanup"] is not None:
-                    conflict_actions = conflict_decision["cleanup"].apply(
-                        conflict_decision["preview"],
-                        delete_templates=conflict_decision["delete_templates"],
-                    )
-                retirement_actions = []
-                if old_record:
-                    old_plan_finished = bool(
-                        old_record.end_date < self.today
-                        or self.state.block_progress_summary(old_record.id)["remaining"] == 0
-                    )
-                    old_plan = (
-                        combined_training_plan(
-                            self.state.block_lineage(old_record.id),
-                            name=old_record.name,
-                        )
-                        if old_plan_finished
-                        else TrainingPlan(old_record.config)
-                    )
-                    retirement = PlanRetirement(
-                        old_plan,
-                        connection,
-                        protected_plans=[new_plan],
-                        today=self.today,
-                        immutable_workouts=immutable_workout_keys(self.state.progress(old_record.id)),
-                        delete_finished_templates=old_plan_finished,
-                    )
-                    retirement_preview = retirement.preview()
-                    retirement_actions = retirement.apply(retirement_preview)
+            preview = workflow.inspect_plan_conflicts(new_record)
+            decision = self._review_conflict_preview(preview)
+            if not decision["proceed"]:
+                self.console.write("No Garmin changes were made; the proposal remains saved locally.")
+                return False
+            result = workflow.apply_plan(
+                new_record,
+                preview,
+                remove_conflicts=decision["remove_conflicts"],
+                delete_templates=decision["delete_templates"],
+                allow_duplicates=decision["allow_duplicates"],
+            )
         except GarminRateLimitError:
             raise
         except Exception as exc:
-            if not changes_started:
-                raise RuntimeError(f"No Garmin changes were made. Details: {exc}") from exc
-            self.state.mark_plan_failed(new_record.id, exc)
             raise RuntimeError(
-                "The replacement was not fully applied. Existing activities were not deleted; "
-                "review Garmin before retrying. "
-                f"Details: {exc}"
+                "The plan could not be fully applied. Completed activities were not deleted; review Garmin before "
+                f"retrying. Details: {exc}"
             ) from exc
-
-        self.state.activate_plan(new_record.id)
-        self.state.record_event(
-            "plan-applied",
-            {
-                "plan_id": new_record.id,
-                "superseded_plan_id": old_record.id if old_record else None,
-                "apply_actions": actions,
-                "conflict_cleanup_actions": conflict_actions,
-                "retirement_actions": retirement_actions,
-            },
+        deleted_templates = sum(
+            action["action"] in {"deleted-workout-template", "deleted-official-workout-template"}
+            for action in result["retirement"]
         )
-        deleted_templates = sum(action["action"] == "deleted-workout-template" for action in retirement_actions)
         message = "The plan was scheduled successfully in Garmin Connect."
         if deleted_templates:
             message += f" Removed {deleted_templates} obsolete workout template(s) from the previous block."
         self.console.write(message)
         return True
+
+    def _review_conflict_preview(self, preview, replacement_pending=True):
+        count = preview["summary"]["overlapping_calendar_entries"]
+        if count == 0:
+            return {
+                "proceed": True,
+                "remove_conflicts": False,
+                "delete_templates": False,
+                "allow_duplicates": False,
+            }
+        self.console.write("Existing Garmin schedule entries overlap this proposal")
+        for item in preview["calendar"]:
+            self.console.write(f"  {item['date']}  {item['name']}")
+        timing = " after the new plan is uploaded" if replacement_pending else " now"
+        remove = self.console.confirm(
+            f"Remove these {count} existing calendar entr{'y' if count == 1 else 'ies'}{timing}?",
+            default=True,
+        )
+        if not remove:
+            proceed = False
+            if replacement_pending:
+                proceed = self.console.confirm(
+                    "Continue and knowingly keep multiple scheduled workouts on those dates?", default=False
+                )
+            return {
+                "proceed": proceed,
+                "remove_conflicts": False,
+                "delete_templates": False,
+                "allow_duplicates": proceed,
+            }
+        unresolved = preview["summary"]["unresolved_calendar_entries"]
+        if unresolved:
+            raise RuntimeError(
+                f"{unresolved} overlapping Garmin entry lacks a schedule ID; cleanup is blocked before changes"
+            )
+        template_count = preview["summary"]["obsolete_template_candidates"]
+        delete_templates = bool(
+            template_count
+            and self.console.confirm(
+                f"Also delete the {template_count} obsolete workout template"
+                f"{'s' if template_count != 1 else ''} from the Garmin workout library? "
+                "Completed activities are unaffected.",
+                default=True,
+            )
+        )
+        return {
+            "proceed": True,
+            "remove_conflicts": True,
+            "delete_templates": delete_templates,
+            "allow_duplicates": False,
+        }
 
     def _review_schedule_conflicts(self, new_plan, connection, replacement_pending=True):
         cleanup = ScheduledConflictCleanup(new_plan, connection, today=self.today)

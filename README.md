@@ -27,7 +27,7 @@ other sports.
 > provider remains the default and fallback. Garmin may change those private legacy endpoints without notice. See the
 > [official-API impact assessment and migration plan](docs/garmin-official-api-migration.md).
 
-Current release: **1.5.2** · [Changelog](CHANGELOG.md) · [Release notes](docs/releases/v1.5.2.md)
+Current release: **2.0.0** · [Changelog](CHANGELOG.md) · [Release notes](docs/releases/v2.0.0.md)
 
 ## From training plan to Garmin Connect and your watch
 
@@ -69,6 +69,10 @@ offers persistent Light and Dark overrides.
 
 ![Dark-mode heart-rate workout builder with sequential time and maximum-BPM steps](docs/images/web-heart-rate-workout.jpg)
 
+| Garmin providers | Selective Garmin cleanup |
+| --- | --- |
+| ![Settings showing independent official activity and workout providers, OAuth connection status, and legacy fallback](docs/images/web-settings-providers.jpg) | ![Cleanup page showing individually selectable planned calendar entries and running workout templates](docs/images/web-cleanup.jpg) |
+
 ## Features
 
 - Automated Garmin Connect workout upload **and dated calendar scheduling** for an approved training block, from either
@@ -85,6 +89,7 @@ offers persistent Light and Dark overrides.
 - Validation for ISO dates and watch-visible name collisions in the first 15 characters.
 - Chronological listing of completed Garmin activities with distance, duration, pace, and heart rate.
 - Selectable official Garmin Personal API source for a single runner's activity summaries and original FIT files.
+- Approved Garmin Starter OAuth connection and official Training API publishing with a private ownership registry.
 - Adaptive selection and automatic download of private original FIT assessment bundles.
 - Local decoding of FIT files with Garmin's official FIT SDK.
 - An interactive, goal-driven planner: no YAML editing is required for normal use.
@@ -93,6 +98,8 @@ offers persistent Light and Dark overrides.
 - Garmin workout execution scores for completed planned runs, fetched once from original FIT data when necessary and cached locally.
 - Supervised mid-block adaptation that replaces only future workouts after explicit approval.
 - Garmin-side overlap detection with explicit consent to retire pre-existing schedules and obsolete templates.
+- Individual or select-all cleanup of planned calendar entries and workout-library templates, with checkpointed resume
+  after Garmin interruptions and safe exclusion of Garmin adaptive-plan-owned templates.
 - An on-demand cleanup action that protects the active local plan while removing older Garmin entries on the same dates.
 - Interactive heart-rate caps, custom ranges, and Garmin zones by workout phase.
 - A one-off HR workout builder for arbitrary sequential steps without YAML.
@@ -151,22 +158,28 @@ completed Garmin activities, calendar history, and local FIT evidence remain unt
 
 Before uploading, the CLI also checks Garmin itself for already scheduled workouts on every proposed date. This catches schedules made by older YAML versions or other tools that are absent from the local planner database. It lists each conflict and asks whether to remove the old calendar entries. Template deletion is a separate confirmation. Declining removal requires a second explicit confirmation before duplicate calendar entries are allowed.
 
-If duplicates already exist, choose **Review and clean Garmin schedule overlaps** from the main menu. The active local plan is treated as the version to keep. The tool previews older running workouts scheduled on those same dates, asks before unscheduling them, and separately asks whether their workout-library templates may also be deleted. A template can be reused on another calendar date, so retain it when unsure. This operation never deletes completed activities.
+If duplicates already exist, choose **Clean Garmin schedules and workout templates → Review and clean schedule
+overlaps** from the main menu. The active local plan is treated as the version to keep. The tool previews older running
+workouts scheduled on those same dates, asks before unscheduling them, and separately asks whether their
+workout-library templates may also be deleted. A template can be reused on another calendar date, so retain it when
+unsure. This operation never deletes completed activities.
 
 For obsolete templates left by a finished block before automatic cleanup was available, open **Garmin cleanup** in the
-web dashboard. Select **Inspect previous-block workouts**, review the exact template names, confirm the deletion, and
-choose **Delete obsolete templates**. This is an idempotent one-time migration: repeating the inspection reports zero
-candidates once cleanup is complete. It does not unschedule calendar history or delete completed activities.
+web dashboard or choose **Clean Garmin schedules and workout templates → Remove obsolete templates from the previous
+finished block** in the interactive CLI. Review the exact template names before confirming deletion. This is an
+idempotent one-time migration: repeating the inspection reports zero candidates once cleanup is complete. It does not
+unschedule calendar history or delete completed activities.
 
-To remove planned calendar entries individually, open **Garmin cleanup** and choose **Load planned Garmin runs**.
+To remove planned calendar entries individually, open **Garmin cleanup** and choose **Load planned Garmin runs**, or
+choose **Clean Garmin schedules and workout templates → Remove selected planned calendar entries** in the CLI.
 The page lists the active block's matching Garmin schedules—including past or missed dates—with individual checkboxes
 and a **Select all** option. Approval unschedules only the checked entries. Future entries are marked skipped in the
 local calendar so they no longer count as remaining; completed activity/FIT records and workout-library templates are
 not deleted.
 
 The Garmin calendar and Garmin workout library are separate. To remove the workout rows visible under **Training &
-Planning → Workouts**, use **Garmin cleanup → Load running workout library**. The resulting list supports individual
-selection and **Select all**. Older templates are removed through the reusable Garmin Connect session; templates
+Planning → Workouts**, use **Garmin cleanup → Load running workout library** or the equivalent interactive CLI cleanup
+menu. Both support individual selection and **Select all**. Older templates are removed through the reusable Garmin Connect session; templates
 created through this application's official Training API connection are deleted through that API. This deletes workout
 definitions only—not completed activities, their FIT evidence, or completed/missed entries in the planner's local
 training history. Bulk removal runs in small resumable batches and checkpoints every item. If Garmin times out after a
@@ -184,6 +197,8 @@ The architecture-independent local state defaults to `~/.garmin-running-workouts
 - `state.sqlite3`: goals, plan history, workout status, cached execution scores, settings, and an audit trail;
 - `tokens/`: reusable Garmin session tokens;
 - `personal-api/`: a private, short-lived Personal API access-token cache (never the Personal API key);
+- `starter-api/`: rotating official OAuth tokens and the app-owned remote workout/schedule registry;
+- `web/`: private review snapshots, resumable-cleanup checkpoints, and short-lived CLI OAuth handoffs;
 - `plans/`: generated, reviewable YAML plans;
 - `activities/`: private FIT assessment bundles and decoded JSON evidence.
 
@@ -197,6 +212,9 @@ The same workflow is also available as explicit commands:
 ./garmin-workouts refresh
 ./garmin-workouts generate
 ./garmin-workouts adapt
+./garmin-workouts providers status
+./garmin-workouts cleanup workouts
+./garmin-workouts cleanup schedules
 ```
 
 YAML commands remain available as an advanced/manual interface and as a transparent interchange format for coaches and future apps.
@@ -205,7 +223,38 @@ YAML commands remain available as an advanced/manual interface and as a transpar
 
 The web interface does not shell out to an interactive terminal process. It calls the same Python domain classes used by the CLI: `Goal`, `DeterministicPlanner`, `AppState`, `PlanApplier`, `ScheduledConflictCleanup`, `PlanRetirement`, the FIT analyzer, and the rate-limited Garmin client. This keeps validation and Garmin behavior consistent while allowing web requests to remain non-interactive.
 
-The existing CLI commands and parameters remain available. The YAML, activity, export, list, get, schedule, delete, setup, status, refresh, generate, and adapt commands are unchanged. Run `./garmin-workouts COMMAND --help` for their parameters. Not every answer in the terminal wizard has a separate command-line flag: goal fields, phase-specific HR targets, deletion consent, and arbitrary one-off workout steps are interactive terminal inputs or web form inputs. Their generated plans remain YAML/JSON artifacts, so unattended automation can continue to use `plan`, `plan-retire`, and the activity commands.
+The existing YAML, activity, export, list, get, schedule, delete, setup, status, refresh, generate, and adapt commands
+remain available. Version 2 adds scriptable `providers` and `cleanup` command groups. Every destructive cleanup command
+is preview-only unless `--apply` is supplied; selective commands require either repeatable `--id` values or `--all`.
+Run `./garmin-workouts COMMAND --help` or `./garmin-workouts cleanup COMMAND --help` for exact parameters.
+
+```shell
+# Inspect configured activity and training providers.
+./garmin-workouts providers status
+
+# Select/test the official Personal API activity source.
+./garmin-workouts providers activity personal
+
+# Start approved Starter OAuth through the configured HTTPS web callback,
+# then select the official workout/calendar publisher.
+./garmin-workouts providers starter-connect
+./garmin-workouts providers training starter
+
+# Preview first; then delete every selectable template in checkpointed batches.
+./garmin-workouts cleanup workouts
+./garmin-workouts cleanup workouts --apply --all --until-complete
+
+# Resume safely after an upstream interruption.
+./garmin-workouts cleanup workouts --resume --until-complete
+
+# Preview and selectively remove Garmin calendar entries for the active block.
+./garmin-workouts cleanup schedules
+./garmin-workouts cleanup schedules --apply --id 12345 --id 12346
+```
+
+Goal fields, phase-specific HR targets, and arbitrary one-off workout steps remain interactive terminal or web inputs.
+Their generated plans remain YAML/JSON artifacts, so unattended automation can continue to use `plan`, `plan-retire`,
+the activity commands, and the new preview-first provider/cleanup commands.
 
 The `web` command adds `--host`, `--port`, `--web-debug`, and the local-development-only `--insecure-cookie` option. Global `--data-dir`, `--username`, `--token-store`, and `--debug` options still go before the command and are honored by the web launcher. A command-line `--password` is intentionally not carried into the long-running web process; connect through the HTTPS settings form or provide reusable tokens instead.
 
@@ -442,9 +491,12 @@ source while the official Training API publishes plans.
    GARMIN_STARTER_REDIRECT_URI=https://planner.example.com/settings/garmin/starter/callback
    ```
 
-3. Restart the service and use **Settings → Official Garmin Connect™ API → Connect with Garmin**.
+3. Restart the service and use **Settings → Official Garmin Connect™ API → Connect with Garmin**. From a terminal that
+   shares the same data directory and running web callback, use `./garmin-workouts providers starter-connect`, open the
+   returned URL, and let the HTTPS callback complete the exchange. The pending PKCE verifier is private, single-use,
+   and expires after ten minutes.
 4. Confirm that Garmin reports <code>WORKOUT_IMPORT</code>, then choose **Settings → Workout and calendar publisher →
-   Official Garmin Starter Training API**.
+   Official Garmin Starter Training API** or run `./garmin-workouts providers training starter`.
 
 The authorization flow uses OAuth 2.0 with PKCE. The client secret and PKCE verifier remain on the server; rotating
 access and refresh tokens are stored with private filesystem permissions under the planner data directory. The Settings

@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -77,6 +78,34 @@ def test_workflow_starter_oauth_uses_environment_and_records_only_identity(tmp_p
     official.exchange_code.assert_called_once_with("code", "verifier")
     assert b"starter-secret" not in database_text
     assert b"verifier" not in database_text
+
+
+def test_workflow_cli_starter_oauth_is_private_short_lived_and_one_time(tmp_path, monkeypatch):
+    authorization = SimpleNamespace(
+        url="https://connect.garmin.test/authorize", state="cli-state", code_verifier="secret"
+    )
+    completed = []
+
+    with AppState(tmp_path / "state") as state:
+        workflow = PlannerWorkflow(state)
+        monkeypatch.setattr(workflow, "begin_starter_authorization", lambda: authorization)
+        monkeypatch.setattr(
+            workflow,
+            "complete_starter_authorization",
+            lambda code, verifier: completed.append((code, verifier)) or {"permissions": ["WORKOUT_IMPORT"]},
+        )
+        started = workflow.begin_cli_starter_authorization()
+        path = workflow._cli_starter_authorization_path()
+        assert started.url == authorization.url
+        assert path.exists()
+
+        status = workflow.complete_cli_starter_authorization("cli-state", "code")
+
+        assert status == {"permissions": ["WORKOUT_IMPORT"]}
+        assert completed == [("code", "secret")]
+        assert not path.exists()
+        with pytest.raises(ValueError, match="missing or invalid"):
+            workflow.complete_cli_starter_authorization("cli-state", "replay")
 
 
 def test_workflow_activity_source_selection_is_tested_and_rolls_back_on_failure(tmp_path, monkeypatch):

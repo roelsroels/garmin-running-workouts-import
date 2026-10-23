@@ -5,6 +5,12 @@ All notable changes to Garmin Running Workouts Import are documented here. The p
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-10-23
+
+Version 2 introduces supported Garmin Developer Program integrations, provider-aware Web and CLI workflows, and
+selective, checkpointed cleanup for Garmin schedules and workout templates. The legacy authenticated Connect session
+remains available as an explicit fallback.
+
 ### Added
 
 - Official Garmin Personal API activity/FIT ingestion, including documented API-key exchange, private short-lived
@@ -26,6 +32,22 @@ All notable changes to Garmin Running Workouts Import are documented here. The p
 - Documentation verification for broken repository-local Markdown links and image references.
 - README badges for security, package and documentation checks, repository activity, Ruff, uv, Dependabot, the tested
   operating systems, and the available web and CLI interfaces.
+- Full CLI parity for provider status and selection, official Starter OAuth initiation, selective planned-schedule
+  removal, resumable workout-library cleanup, overlap cleanup, and previous-block template retirement.
+- A secure terminal-to-web OAuth handoff: the CLI stores a short-lived PKCE verifier privately, and the configured
+  HTTPS callback consumes it once without exposing it in terminal arguments or browser storage.
+- Select-all and individual deletion of Garmin workout-library templates and active-plan calendar entries.
+- Checkpointed workout-template deletion that resumes after upstream failures and reconciles items already absent from
+  Garmin before continuing.
+
+### Changed
+
+- Interactive CLI plan application, one-off heart-rate workouts, cleanup, and retirement now use the same
+  provider-aware application workflow as the web interface.
+- The terminal settings menu independently configures the activity/FIT source, official Garmin connection, workout
+  publisher, legacy session, and optional LLM provider.
+- Official Training API publishing is ownership-scoped: only remote workout and schedule IDs created by this
+  application are eligible for official deletion.
 
 ### Fixed
 
@@ -34,6 +56,18 @@ All notable changes to Garmin Running Workouts Import are documented here. The p
 - README release badge no longer uses an unnecessary query parameter that could leave a stale invalid result cached.
 - The coverage badge now uses a repository-hosted snapshot from the verified CI report, avoiding an unconfigured
   external service and preventing a misleading `unknown` value.
+- Garmin Personal API requests now negotiate Garmin's accepted response media types and report rejected credentials or
+  permissions without exposing response bodies.
+- Official OAuth launch uses normal browser navigation so Garmin authorization is not blocked by form or script
+  behavior.
+- Bulk workout cleanup no longer produces an HTTP 500 or repeats completed deletions after an upstream interruption.
+- Workout templates owned by a Garmin adaptive training plan are identified as Garmin-managed, excluded from future
+  retries, and left for management through the owning Garmin plan.
+
+### Security
+
+- Personal API keys and Starter client secrets remain environment-only. Rotating OAuth tokens, ownership registries,
+  and pending CLI PKCE data use private application-state directories and are excluded from Git.
 
 ## [1.5.2] - 2026-09-04
 

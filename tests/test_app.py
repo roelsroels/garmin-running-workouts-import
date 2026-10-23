@@ -1,5 +1,6 @@
 import sys
 from datetime import date
+from types import SimpleNamespace
 
 import pytest
 
@@ -14,6 +15,7 @@ from garminworkouts.app import (
 )
 from garminworkouts.llm import LLMConfig
 from garminworkouts.state import AppState
+from garminworkouts.workflows import PlannerWorkflow
 
 
 @pytest.mark.parametrize("provider", ["anthropic", "openai-compatible"])
@@ -140,6 +142,74 @@ def test_help_never_prints_credential_defaults(monkeypatch, capsys):
 
     assert exc.value.code == 0
     assert secret not in capsys.readouterr().out
+
+
+def test_cli_exposes_provider_and_cleanup_commands(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["garmin-workouts", "cleanup", "--help"])
+    with pytest.raises(SystemExit) as exc:
+        main()
+    assert exc.value.code == 0
+    output = capsys.readouterr().out
+    assert "workouts" in output
+    assert "schedules" in output
+    assert "previous-block" in output
+
+    monkeypatch.setattr(sys, "argv", ["garmin-workouts", "providers", "--help"])
+    with pytest.raises(SystemExit) as exc:
+        main()
+    assert exc.value.code == 0
+    output = capsys.readouterr().out
+    assert "starter-connect" in output
+    assert "training" in output
+
+
+def test_cli_cleanup_workouts_is_preview_only_without_apply(tmp_path, monkeypatch, capsys):
+    preview = {
+        "workouts": [{"workout_id": 42, "name": "Old run", "action": "delete"}],
+        "summary": {"selectable_workout_templates": 1},
+    }
+    monkeypatch.setattr(PlannerWorkflow, "inspect_workout_library", lambda _workflow: preview)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["garmin-workouts", "--data-dir", str(tmp_path), "cleanup", "workouts"],
+    )
+
+    main()
+
+    output = capsys.readouterr().out
+    assert '"mode": "preview"' in output
+    assert '"workout_id": 42' in output
+
+
+def test_interactive_plan_application_uses_shared_provider_workflow(tmp_path, monkeypatch):
+    applied = []
+    workflow = SimpleNamespace(
+        inspect_plan_conflicts=lambda record: {
+            "calendar": [],
+            "summary": {
+                "overlapping_calendar_entries": 0,
+                "unresolved_calendar_entries": 0,
+                "obsolete_template_candidates": 0,
+            },
+        },
+        apply_plan=lambda record, preview, **choices: (
+            applied.append((record, preview, choices)) or {"apply": [], "conflicts": [], "retirement": []}
+        ),
+    )
+    record = SimpleNamespace(id=7)
+    with AppState(tmp_path) as state:
+        app = InteractiveApp(state)
+        monkeypatch.setattr(app, "_workflow", lambda: workflow)
+
+        assert app._apply_replacement(record) is True
+
+    assert applied[0][0] is record
+    assert applied[0][2] == {
+        "remove_conflicts": False,
+        "delete_templates": False,
+        "allow_duplicates": False,
+    }
 
 
 def test_calendar_changes_reports_only_future_removals():
