@@ -837,12 +837,31 @@ def test_cleanup_selects_individual_or_all_active_plan_schedules(tmp_path, monke
     assert b'name="schedule_ids" value="101"' in page.data
     assert b'id="remove-selected-schedules" disabled' in page.data
 
+    empty_preview = {
+        **preview,
+        "calendar": [],
+        "summary": {
+            **preview["summary"],
+            "selectable_calendar_entries": 0,
+            "past_calendar_entries": 0,
+        },
+    }
+    monkeypatch.setattr(PlannerWorkflow, "load_selectable_schedules", lambda _workflow, _plan_id: empty_preview)
+    empty_page = client.get("/cleanup?schedules_inspected=1")
+    assert b'class="notice info"' in empty_page.data
+    assert b"Planned-run check complete" in empty_page.data
+    assert b"No removable Garmin calendar entries match the active training block." in empty_page.data
+
+    monkeypatch.setattr(PlannerWorkflow, "load_selectable_schedules", lambda _workflow, _plan_id: preview)
+
     response = client.post(
         "/cleanup/schedules/apply",
         data={"csrf_token": _csrf(client), "schedule_ids": ["101", "102"]},
         follow_redirects=True,
     )
     assert response.status_code == 200
+    assert b'class="notice success"' in response.data
+    assert b"Action completed" in response.data
     assert b"Removed 1 selected calendar entry." in response.data
     assert removed == [(record.id, preview, ["101", "102"])]
 

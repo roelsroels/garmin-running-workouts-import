@@ -262,7 +262,17 @@ label small { color: var(--muted); font-weight: 400; line-height: 1.4; }
 .step-row { display: grid; grid-template-columns: 2rem 1fr 1fr 1fr 1fr auto; gap: .65rem; align-items: end; padding: .8rem; border: 1px solid var(--line); border-radius: 12px; background: var(--inset-bg); }
 .step-number { align-self: center; color: var(--mint); font-weight: 900; }
 .icon-button { width: 38px; height: 42px; border-radius: 9px; border: 1px solid var(--line); background: transparent; color: var(--red); font-size: 1.3rem; }
-.notice { margin-bottom: 1rem; padding: .9rem 1rem; border: 1px solid var(--border-good); border-radius: 10px; color: var(--mint); background: var(--mint-dark); }
+.notice { --notice-accent: var(--mint); --notice-border: var(--border-good); display: grid; grid-template-columns: 2.25rem minmax(0, 1fr); align-items: start; gap: .85rem; margin: 0 0 1.5rem; padding: 1rem 1.1rem; border: 1px solid var(--notice-border); border-left-width: 5px; border-radius: 14px; color: var(--text); background: color-mix(in srgb, var(--notice-accent) 12%, var(--surface)); box-shadow: 0 12px 34px var(--shadow); }
+.notice.success { --notice-accent: var(--mint); --notice-border: var(--border-good); }
+.notice.warning { --notice-accent: var(--amber); --notice-border: var(--border-warning); }
+.notice.error { --notice-accent: var(--red); --notice-border: var(--border-danger); }
+.notice.info { --notice-accent: var(--mint); --notice-border: var(--line); }
+.notice-icon { display: grid; place-items: center; width: 2.25rem; height: 2.25rem; border: 1px solid var(--notice-border); border-radius: 50%; color: var(--notice-accent); background: var(--surface); font-size: 1.1rem; font-weight: 900; line-height: 1; }
+.notice-copy, .notice-title, .notice-message { display: block; }
+.notice-copy { min-width: 0; }
+.notice-title { margin-bottom: .2rem; color: var(--notice-accent); font-size: .76rem; font-weight: 850; letter-spacing: .09em; text-transform: uppercase; }
+.notice-message { color: var(--text); line-height: 1.5; }
+.card > .notice:last-child, .conflict-card > .notice:last-child { margin-bottom: 0; }
 .error-panel { max-width: 720px; margin: 8vh auto; padding: 2rem; }
 .error-panel h1 { font-size: clamp(2rem, 5vw, 3.6rem); }
 

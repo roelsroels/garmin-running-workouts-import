@@ -1,4 +1,5 @@
 <!doctype html>
+{% from "_feedback.html" import feedback_notice %}
 <html lang="en">
   <head>
     <meta charset="utf-8">
@@ -37,7 +38,7 @@
     <main class="page-shell">
       {% with messages = get_flashed_messages(with_categories=true) %}
         {% for category, message in messages %}
-          <div class="notice {{ category }}" role="status">{{ message }}</div>
+          {{ feedback_notice(message, category) }}
         {% endfor %}
       {% endwith %}
       {% block content %}{% endblock %}

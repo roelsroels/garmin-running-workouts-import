@@ -5,6 +5,11 @@ All notable changes to Garmin Running Workouts Import are documented here. The p
 
 ## [Unreleased]
 
+### Fixed
+
+- Web action results now use a shared, high-contrast feedback component with clear success, information, warning, and
+  error labels. Inline Garmin inspection outcomes no longer blend into surrounding explanatory text.
+
 ## [2.0.0] - 2026-10-23
 
 Version 2 introduces supported Garmin Developer Program integrations, provider-aware Web and CLI workflows, and

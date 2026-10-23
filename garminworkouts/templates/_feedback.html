@@ -1,0 +1,15 @@
+{% macro feedback_notice(message, category='info', title=None) -%}
+  {% set variant = category if category in ('success', 'warning', 'error', 'info') else 'info' %}
+  {% if title is none %}
+    {% set title = {
+      'success': 'Action completed',
+      'warning': 'Attention needed',
+      'error': 'Action could not be completed',
+      'info': 'Result'
+    }[variant] %}
+  {% endif %}
+  <section class="notice {{ variant }}" role="{{ 'alert' if variant in ('warning', 'error') else 'status' }}" aria-live="{{ 'assertive' if variant in ('warning', 'error') else 'polite' }}" aria-atomic="true">
+    <span class="notice-icon" aria-hidden="true">{{ {'success': '✓', 'warning': '!', 'error': '×', 'info': 'i'}[variant] }}</span>
+    <span class="notice-copy"><strong class="notice-title">{{ title }}</strong><span class="notice-message">{{ message }}</span></span>
+  </section>
+{%- endmacro %}

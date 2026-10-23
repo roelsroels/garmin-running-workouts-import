@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_feedback.html" import feedback_notice %}
 {% block title %}Garmin cleanup · Running Planner{% endblock %}
 {% block content %}
   <div class="page-heading"><div><p class="eyebrow">Controlled cleanup</p><h1>Clean Garmin Connect</h1><p>Inspect the exact calendar entries or workout templates before approving any removal. Completed activities and FIT records stay separate and are never deleted here.</p></div></div>
@@ -14,7 +15,7 @@
           <p class="eyebrow">Resumable deletion</p>
           <h3>{{ completed_count }} of {{ library_deletion.total }} reconciled</h3>
           <p class="muted">{{ remaining_count }} template{{ '' if remaining_count == 1 else 's' }} remaining. Progress is saved after every remote deletion, so refreshing or retrying cannot repeat completed work.</p>
-          {% if library_deletion.last_error %}<p class="warning-text">{{ library_deletion.last_error }}</p>{% endif %}
+          {% if library_deletion.last_error %}{{ feedback_notice(library_deletion.last_error, 'warning', 'Cleanup paused safely') }}{% endif %}
         </div>
         <form method="post" action="{{ url_for('continue_workout_library_deletion') }}" data-loading-message="Continuing workout cleanup…" data-loading-detail="Deleting a small batch and saving progress after every item."{% if library_deletion.status == 'running' %} data-auto-submit="true"{% endif %}>
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -52,7 +53,7 @@
         </div>
       {% endif %}
       {% if not workout_count and not managed_count %}
-        <p class="muted">No running workout templates were found in Garmin Connect.</p>
+        {{ feedback_notice('No running workout templates were found in Garmin Connect.', 'info', 'Workout-library check complete') }}
       {% endif %}
     {% endif %}
   </section>
@@ -68,12 +69,12 @@
           <form method="post" action="{{ url_for('inspect_obsolete_cleanup') }}" data-loading-message="Inspecting old workouts…" data-loading-detail="Comparing the finished block with the active workout library without making changes."><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="button primary">Inspect previous-block workouts</button></form>
         {% else %}
           {% set obsolete_count = obsolete_preview.summary.workout_templates_to_delete %}
-          <p><strong>{{ obsolete_count }} obsolete workout template{{ '' if obsolete_count == 1 else 's' }} found.</strong></p>
+          {{ feedback_notice(obsolete_count ~ ' obsolete workout template' ~ ('' if obsolete_count == 1 else 's') ~ ' found.', 'info', 'Previous-block check complete') }}
           {% if obsolete_count %}
             <div class="conflict-list">{% for item in obsolete_preview.workouts if item.action == 'delete' %}<div><strong>{{ item.name }}</strong><span>delete template</span></div>{% endfor %}</div>
             <form class="approval-box vertical" method="post" action="{{ url_for('apply_obsolete_cleanup') }}" data-loading-message="Cleaning the workout library…" data-loading-detail="Deleting only the reviewed obsolete templates. Completed activities remain untouched."><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label class="consent warning"><input type="checkbox" name="confirm_obsolete_cleanup" value="1"><span><strong>Delete these {{ obsolete_count }} obsolete template{{ '' if obsolete_count == 1 else 's' }}</strong><small>This does not delete completed activities, FIT evidence, execution scores, or the active block.</small></span></label><button class="button danger">Delete obsolete templates</button></form>
           {% else %}
-            <p class="muted">Nothing needs removal. The one-time cleanup has already been completed or no obsolete templates remain.</p>
+            {{ feedback_notice('Nothing needs removal. The one-time cleanup has already been completed or no obsolete templates remain.', 'success', 'Previous-block check complete') }}
           {% endif %}
         {% endif %}
       {% else %}
@@ -106,9 +107,9 @@
             <button class="button danger" id="remove-selected-schedules" disabled>Remove selected entries</button>
           </form>
         {% else %}
-          <p class="muted">No removable Garmin calendar entries match the active training block.</p>
+          {{ feedback_notice('No removable Garmin calendar entries match the active training block.', 'info', 'Planned-run check complete') }}
         {% endif %}
-        {% if schedule_preview.summary.unresolved_calendar_entries %}<p class="warning-text">{{ schedule_preview.summary.unresolved_calendar_entries }} matching entry or entries could not be selected because Garmin did not return a schedule ID.</p>{% endif %}
+        {% if schedule_preview.summary.unresolved_calendar_entries %}{{ feedback_notice(schedule_preview.summary.unresolved_calendar_entries ~ ' matching entry or entries could not be selected because Garmin did not return a schedule ID.', 'warning', 'Some entries are unavailable') }}{% endif %}
       {% endif %}
     </section>
 
