@@ -9,6 +9,7 @@ from garminworkouts.garmin.personalclient import (
     ACTIVITY_DOWNLOAD_PATH,
     ACTIVITY_SEARCH_PATH,
     BASE_URL,
+    TOKEN_ACCEPT,
     TOKEN_PATH,
     GarminPersonalAuthenticationError,
     PersonalGarminClient,
@@ -63,7 +64,7 @@ def test_personal_client_mints_token_lists_activities_and_uses_bearer_header(tmp
     activity_request = opener.open.call_args_list[1].args[0]
     assert token_request.full_url == f"{BASE_URL}{TOKEN_PATH}"
     assert token_request.method == "POST"
-    assert token_request.get_header("Accept") == "application/json"
+    assert token_request.get_header("Accept") == TOKEN_ACCEPT
     assert token_request.get_header("Authorization") == "ApiKey personal-secret-key"
     assert activity_request.full_url.startswith(f"{BASE_URL}{ACTIVITY_SEARCH_PATH}?")
     assert "activityType=running" in activity_request.full_url

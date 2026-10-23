@@ -16,6 +16,7 @@ TOKEN_PATH = "/personalapitoken-service/personal-api/personal-api-key/token"
 ACTIVITY_SEARCH_PATH = "/activitylist-service/activities/search/activities"
 ACTIVITY_DOWNLOAD_PATH = "/download-service/files/activity/{activity_id}"
 TOKEN_CACHE_FILENAME = "access-token.json"
+TOKEN_ACCEPT = "*/*"
 
 
 class GarminPersonalAPIError(RuntimeError):
@@ -138,6 +139,10 @@ class PersonalGarminClient:
             TOKEN_PATH,
             method="POST",
             authorization=f"ApiKey {self.api_key}",
+            # Garmin's documented token example leaves response negotiation open.
+            # The endpoint may return either JSON or a bare token, both of which
+            # _parse_token_response supports. Forcing application/json produces 406.
+            accept=TOKEN_ACCEPT,
         )
         token, expires_in = _parse_token_response(payload)
         now = self.clock()

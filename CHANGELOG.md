@@ -9,6 +9,8 @@ All notable changes to Garmin Running Workouts Import are documented here. The p
 
 - Web action results now use a shared, high-contrast feedback component with clear success, information, warning, and
   error labels. Inline Garmin inspection outcomes no longer blend into surrounding explanatory text.
+- Personal API token renewal now follows Garmin's documented open response negotiation instead of forcing JSON, which
+  caused HTTP 406 when a cached 24-hour access token expired.
 
 ## [2.0.0] - 2026-10-23
 
